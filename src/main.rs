@@ -1,13 +1,18 @@
+use rune::tok::motion;
 use rune::{
-    Align, App, AppSpec, Color, Cx, El, Key, KeyEvent, KeyPolicy, OverlayInput, OverlayOptions,
-    OverlayPlacement, OverlaySpec, ScreenEdge, Tx, WindowSpec, col, el, row, text,
+    Align, App, AppSpec, Color, Cx, El, Icon, Key, KeyEvent, KeyPolicy, OverlayInput,
+    OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, TextStyle, Tx, WindowSpec, col, el,
+    icon, row, text,
 };
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    Mutex, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 const INK: Color = Color {
-    r: 0.20,
-    g: 0.23,
-    b: 0.25,
+    r: 0.161,
+    g: 0.180,
+    b: 0.169,
     a: 1.0,
 };
 const MUTED: Color = Color {
@@ -17,9 +22,9 @@ const MUTED: Color = Color {
     a: 1.0,
 };
 const PAPER: Color = Color {
-    r: 0.94,
-    g: 0.93,
-    b: 0.90,
+    r: 0.98,
+    g: 0.965,
+    b: 0.933,
     a: 1.0,
 };
 const STONE: Color = Color {
@@ -34,6 +39,21 @@ const MOSS: Color = Color {
     b: 0.36,
     a: 1.0,
 };
+// Warm brown from the VM's Mist & Stone palette.
+const WARM: Color = Color {
+    r: 0.604,
+    g: 0.459,
+    b: 0.298,
+    a: 1.0,
+};
+const POWER_ICON: Icon = Icon {
+    name: "power",
+    view: 24.0,
+    body: r#"<path d="M12 2v9M6.3 5.7a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>"#,
+};
+const LABEL: TextStyle = TextStyle::new(15.5, 700.0);
+const SECONDARY: TextStyle = TextStyle::new(15.5, 400.0);
+const CLOCK: TextStyle = TextStyle::new(18.0, 700.0).mono().tracking(0.5);
 
 struct State {
     workspace: usize,
@@ -50,42 +70,57 @@ impl Default for State {
 }
 
 static MENU: OnceLock<Mutex<Option<rune::OverlayHandle<State>>>> = OnceLock::new();
+static MENU_OPEN: AtomicBool = AtomicBool::new(false);
 
 fn menu_handle() -> Option<rune::OverlayHandle<State>> {
     MENU.get()?.lock().ok()?.clone()
 }
 
 fn bar(state: &State, _: &mut Cx<State>) -> El {
-    let mut workspaces = row().gap(5.0).items_center();
+    let mut workspaces = row()
+        .gap(3.0)
+        .px(4.0)
+        .h(34.0)
+        .items_center()
+        .radius(17.0)
+        .gradient(Color::WHITE.alpha(0.27), INK.alpha(0.24))
+        .border(1.0, Color::WHITE.alpha(0.38));
     for i in 1..=4 {
         let active = state.workspace == i;
         workspaces = workspaces.child(
-            el().size(30.0, 28.0)
+            el().key(format!("workspace-{i}"))
+                .size(29.0, 27.0)
                 .center()
-                .radius(8.0)
+                .radius(13.5)
                 .fill(if active {
-                    MOSS
+                    WARM.alpha(0.90)
                 } else {
                     Color::WHITE.alpha(0.0)
                 })
-                .child(text(i.to_string()).color(if active { PAPER } else { INK }))
+                .hover(Color::WHITE.alpha(0.34))
+                .motion(motion::SNAPPY)
+                .child(text(i.to_string()).font(LABEL).color(Color::WHITE))
                 .on_press(move |s: &mut State| s.workspace = i),
         );
     }
 
     let power = row()
-        .h(30.0)
-        .px(12.0)
-        .gap(7.0)
-        .center_y()
-        .radius(9.0)
-        .fill(STONE.alpha(0.45))
-        .child(text("Power").color(INK))
+        .size(34.0, 34.0)
+        .center()
+        .radius(17.0)
+        .gradient(Color::WHITE.alpha(0.27), INK.alpha(0.24))
+        .border(1.0, Color::WHITE.alpha(0.38))
+        .hover(Color::WHITE.alpha(0.34))
+        .child(icon(&POWER_ICON, 21.0).color(Color::WHITE))
         .on_press(|_: &mut State| {
             if let Some(menu) = menu_handle() {
-                menu.update(|state, _| state.confirmation = None);
-                menu.show();
-                menu.request_keys();
+                if MENU_OPEN.fetch_xor(true, Ordering::Relaxed) {
+                    menu.hide();
+                } else {
+                    menu.update(|state, _| state.confirmation = None);
+                    menu.show();
+                    menu.request_keys();
+                }
             }
         });
 
@@ -94,14 +129,19 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
         .h_full()
         .px(18.0)
         .items_center()
-        .fill(PAPER.alpha(0.84))
+        .fill(Color::TRANSPARENT)
         .child(row().w(220.0).child(workspaces))
         .child(
-            row()
-                .grow(1.0)
-                .items_center()
-                .justify_center()
-                .child(text("09:41").color(INK)),
+            row().grow(1.0).items_center().justify_center().child(
+                el().h(34.0)
+                    .px(16.0)
+                    .center()
+                    .radius(17.0)
+                    .gradient(Color::WHITE.alpha(0.30), INK.alpha(0.27))
+                    .border(1.0, Color::WHITE.alpha(0.42))
+                    .hover(Color::WHITE.alpha(0.34))
+                    .child(text("09:41").font(CLOCK).color(Color::WHITE)),
+            ),
         )
         .child(row().w(220.0).justify_end().child(power))
 }
@@ -112,12 +152,17 @@ fn menu(state: &State, _: &mut Cx<State>) -> El {
         .padding(14.0)
         .gap(8.0)
         .radius(14.0)
-        .fill(PAPER.alpha(0.92))
-        .border(1.0, STONE)
-        .child(text("Power").color(INK));
+        .fill(PAPER.alpha(0.97))
+        .border(1.5, MOSS.alpha(0.55))
+        .shadow(3.0, 12.0, INK.alpha(0.25))
+        .child(text("Power").font(LABEL).color(INK));
     if let Some(action) = state.confirmation {
         content = content
-            .child(text(format!("Confirm {action}? (mock only)")).color(MUTED))
+            .child(
+                text(format!("Confirm {action}? (mock only)"))
+                    .font(SECONDARY)
+                    .color(MUTED),
+            )
             .child(
                 col()
                     .gap(8.0)
@@ -130,7 +175,7 @@ fn menu(state: &State, _: &mut Cx<State>) -> El {
                 .child(button(action).on_press(move |s: &mut State| s.confirmation = Some(action)));
         }
     }
-    col().w_full().h_full().child(content)
+    col().w_full().h_full().px(8.0).pb(12.0).child(content)
 }
 
 fn button(label: &'static str) -> El {
@@ -140,13 +185,15 @@ fn button(label: &'static str) -> El {
         .px(10.0)
         .center_y()
         .radius(8.0)
-        .fill(STONE.alpha(0.45))
-        .child(text(label).color(INK))
+        .fill(STONE.alpha(0.35))
+        .hover(STONE.alpha(0.70))
+        .child(text(label).font(SECONDARY).color(INK))
 }
 
 fn menu_key(_: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
     if event.key == Key::Escape {
         if let Some(menu) = menu_handle() {
+            MENU_OPEN.store(false, Ordering::Relaxed);
             menu.hide();
         }
         true
@@ -169,7 +216,7 @@ fn main() {
             State::default(),
         );
         let menu_overlay = app.overlay(
-            OverlaySpec::new("snowbar-power", (230.0, 210.0), menu)
+            OverlaySpec::new("snowbar-power", (246.0, 222.0), menu)
                 .options(OverlayOptions {
                     input: OverlayInput::All,
                     keys: KeyPolicy::OnDemand,
