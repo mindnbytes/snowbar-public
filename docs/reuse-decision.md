@@ -71,5 +71,21 @@ repository.
 
 The first launch failed because its temporary runtime environment lacked the
 Wayland library; adding the library path allowed the test to start. No
-screenshot was captured. Fullscreen behavior, a separate menu, keyboard
-focus and dismissal, resizing, disconnects and packaging remain untested.
+screenshot was captured. At that point, fullscreen behavior, a separate menu,
+keyboard focus and dismissal, resizing, disconnects and packaging were untested.
+
+### Menu and fullscreen follow-up
+
+An extended disposable probe used a separate, non-exclusive Rune overlay for
+the menu. The user observed the menu opening and dismissing on click, but with
+a large gap below the bar. Escape did **not** dismiss it. The Wayland log
+shows on-demand keyboard focus and Escape key events arriving at the menu
+surface, but no probe key-handler log; the cause remains unconfirmed. The menu
+was requested with a 40-point top margin in addition to the bar's reserved
+space, which may explain the gap; this needs a positioning retest.
+
+The user also observed that the bar disappeared when the window entered
+fullscreen, with some delay. The delay's source and behavior across other
+conditions are unverified. These results demonstrate pointer interaction and
+the observed fullscreen transition, but the keyboard/dismissal part of the
+feasibility gate remains open. No screenshot was captured.
