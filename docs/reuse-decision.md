@@ -110,3 +110,22 @@ click-outside dismissal, other keyboard layouts, correct behavior across
 output changes, loss of Wayland, or a reproducible application build. Before
 implementation, decide how to maintain or upstream the necessary small Rune
 changes; do not silently depend on the disposable checkout.
+
+### Fork maintenance decision
+
+Use [mindnbytes/rune](https://github.com/mindnbytes/rune) as a temporary fork,
+keeping our changes small and preserving existing overlay behavior by default.
+The application will pin a tested fork commit, not follow a moving branch.
+Check upstream regularly, ideally daily, but integrate changes deliberately
+and rerun the relevant build and VM checks before updating the pin; do not
+automatically merge untested upstream changes. Once our changes have been
+tested for this use case and their behavior is satisfactory, propose them
+upstream. Rune's contribution guidance currently requests issues rather than
+pull requests; follow its guidance at the time. The experimental changes are
+published on [`snowbar/wayland-bar` at
+`bd4c25c3bcda14b4d4c2344c1cac7d921ef50192`](https://github.com/mindnbytes/rune/commit/bd4c25c3bcda14b4d4c2344c1cac7d921ef50192),
+based on Rune `45eb5cab82400f8bdc4d494573af133af701619c`. The additive
+builder leaves existing overlay options unchanged. The included temporary
+probe built on the VM, and the user confirmed reservation, menu placement and
+Escape dismissal. Full compatibility and failure handling have not been
+established; the application dependency has not yet been pinned.
