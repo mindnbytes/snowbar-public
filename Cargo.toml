@@ -1,0 +1,7 @@
+[package]
+name = "snowbar"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rune = { git = "https://github.com/mindnbytes/rune", rev = "bd4c25c3bcda14b4d4c2344c1cac7d921ef50192" }
