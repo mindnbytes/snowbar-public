@@ -89,3 +89,24 @@ fullscreen, with some delay. The delay's source and behavior across other
 conditions are unverified. These results demonstrate pointer interaction and
 the observed fullscreen transition, but the keyboard/dismissal part of the
 feasibility gate remains open. No screenshot was captured.
+
+### Menu retest
+
+The user confirmed that removing the menu's extra top margin eliminated the
+gap. With the original Rune keymap read, diagnostics showed the menu had
+keyboard focus and received Escape, but `xkb` state was absent and libxkbcommon
+reported a parse error. In the disposable Rune checkout, changing the keymap
+read to an offset-based `read_exact_at(..., 0)` produced a valid keymap; the
+user confirmed Escape dismissed the menu, and the log recorded the Escape
+callback. This isolates a working workaround, not a proven root cause or a
+production-ready upstream fix. The user also confirmed the menu still
+dismissed on click. The probe and diagnostic changes remain outside the
+project repository.
+
+The feasibility prototype has now demonstrated reservation, clicks, an
+interactive separate menu, on-demand keyboard focus, Escape dismissal, and
+the observed fullscreen transition on this VM. It does not establish
+click-outside dismissal, other keyboard layouts, correct behavior across
+output changes, loss of Wayland, or a reproducible application build. Before
+implementation, decide how to maintain or upstream the necessary small Rune
+changes; do not silently depend on the disposable checkout.
