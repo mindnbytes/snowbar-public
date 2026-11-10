@@ -105,6 +105,7 @@ Each slice must leave the bar buildable and usable. No massive speculative scaff
 - Read this file and relevant upstream documentation before proposing major changes.
 - First complete the reuse/feasibility assessment, **then** write implementation code.
 - Prefer the minimal working solution; explain trade-offs before adding crates/processes/abstractions.
+- Prefer delegating straightforward and easily testable pieces of work to subagent, use OpenAI GPT-6 Luna.
 - Pin Rune and other unstable dependencies. Keep `Cargo.lock` and `flake.lock` committed.
 - Use `nix develop` + `cargo` for rapid iteration; reserve `nix build` for packaging validation. Do not rebuild all of NixOS after every UI edit.
 - Work on the bar repository independently of the host's main NixOS configuration; never modify a live session or perform power actions without explicit approval.
