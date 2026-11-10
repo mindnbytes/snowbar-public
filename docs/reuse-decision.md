@@ -56,3 +56,20 @@ A separate existing `Rect` or edge-positioned Rune overlay is a plausible
 menu surface, but its stacking relative to the bar, input, keyboard focus,
 dismissal, and output-relative positioning are also unverified. A prototype
 must test these instead of treating an in-window popover as proof.
+
+### Reserved-bar prototype
+
+A disposable modification of Rune at the revision above was built on the
+ARM64 VM with Rust 1.99.0 and run in niri 26.04. The test used the top layer,
+top/left/right anchors, compositor-determined width and a 40-logical-pixel
+exclusive zone. The Wayland log recorded a 1728 × 40 configure and click
+events. The user confirmed that the bar was visible across the top, the click
+counter increased, and tiled windows started below it. The output was at
+1.75× scale. This supports the narrow reserved-bar approach without proving
+the prototype is production-ready; the temporary patch is not part of this
+repository.
+
+The first launch failed because its temporary runtime environment lacked the
+Wayland library; adding the library path allowed the test to start. No
+screenshot was captured. Fullscreen behavior, a separate menu, keyboard
+focus and dismissal, resizing, disconnects and packaging remain untested.
