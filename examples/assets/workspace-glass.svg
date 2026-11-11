@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
+  <defs>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dce5e0" stop-opacity="0.30"/>
+      <stop offset="0.16" stop-color="#c4cfca" stop-opacity="0.13"/>
+      <stop offset="0.54" stop-color="#606a65" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#9eaaa3" stop-opacity="0.16"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.98"/>
+      <stop offset="0.19" stop-color="#eef2ee" stop-opacity="0.68"/>
+      <stop offset="0.46" stop-color="#5c6563" stop-opacity="0.45"/>
+      <stop offset="0.80" stop-color="#c6d0ca" stop-opacity="0.50"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.78"/>
+    </linearGradient>
+    <radialGradient id="toplight" cx="0.16" cy="0.04" r="0.70">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.84"/>
+      <stop offset="0.24" stop-color="#f5f7f0" stop-opacity="0.25"/>
+      <stop offset="0.7" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bottomlight" cx="0.79" cy="1" r="0.65">
+      <stop offset="0" stop-color="#ecf5ee" stop-opacity="0.43"/>
+      <stop offset="0.55" stop-color="#dae5df" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-35%" y="-35%" width="170%" height="190%"><feGaussianBlur stdDeviation="8"/></filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <rect x="24" y="27" width="272" height="272" rx="74" fill="none" stroke="#000" stroke-width="6" opacity="0.45" filter="url(#shadow)"/>
+  <rect x="18" y="18" width="284" height="284" rx="80" fill="url(#glass)" stroke="url(#rim)" stroke-width="5"/>
+  <rect x="25" y="25" width="270" height="270" rx="73" fill="none" stroke="#e8f3ed" stroke-opacity="0.32" stroke-width="3"/>
+  <rect x="31" y="31" width="258" height="258" rx="68" fill="url(#toplight)"/>
+  <rect x="31" y="31" width="258" height="258" rx="68" fill="url(#bottomlight)"/>
+  <path d="M43 107 Q44 42 105 35 L189 35" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="5" stroke-linecap="round" filter="url(#soft)"/>
+  <path d="M49 103 Q51 48 103 41 L153 41" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-width="2" stroke-linecap="round"/>
+  <path d="M51 253 Q67 286 113 288 L214 288 Q268 285 282 243" fill="none" stroke="#e6f4ec" stroke-opacity="0.44" stroke-width="4" stroke-linecap="round" filter="url(#soft)"/>
+  <path d="M68 270 Q85 285 112 285 L210 285" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

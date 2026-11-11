@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="220" viewBox="0 0 200 220">
+  <defs>
+    <path id="power" d="M91 31 Q91 24 100 24 Q109 24 109 31 V96 Q109 104 100 104 Q91 104 91 96 Z M74 56 C45 67 28 94 28 126 C28 169 60 201 100 201 C140 201 172 169 172 126 C172 94 155 67 126 56 L126 78 C143 88 153 105 153 126 C153 156 130 180 100 180 C70 180 47 156 47 126 C47 105 57 88 74 78 Z"/>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2d4"/><stop offset=".55" stop-color="#bca27f"/><stop offset="1" stop-color="#715136"/></linearGradient>
+    <linearGradient id="bevel" x1="0" y1="0" x2=".8" y2="1"><stop offset="0" stop-color="#fff"/><stop offset=".25" stop-color="#fff8e9"/><stop offset=".65" stop-color="#d8c8ac"/><stop offset="1" stop-color="#a08767"/></linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf4"/><stop offset=".2" stop-color="#fff6e5"/><stop offset=".72" stop-color="#dfd4bf"/><stop offset="1" stop-color="#c0ad90"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <use href="#power" transform="translate(3 13)" fill="#000" opacity=".75" filter="url(#shadow)"/>
+  <use href="#power" transform="translate(0 8)" fill="url(#side)"/>
+  <use href="#power" fill="url(#bevel)"/>
+  <use href="#power" transform="translate(2 3) scale(.965)" fill="url(#face)"/>
+  <path d="M94 32 Q94 28 100 28 M35 115 C39 91 52 74 72 64 M42 132 C45 164 70 187 100 189" fill="none" stroke="#fffefa" stroke-opacity=".9" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M165 125 C165 159 138 190 105 190 M106 35 V91" fill="none" stroke="#8d7456" stroke-opacity=".62" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

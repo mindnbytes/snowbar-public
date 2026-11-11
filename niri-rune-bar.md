@@ -18,6 +18,16 @@ No other widgets in v1. Specifically: no tray, notifications, network/audio cont
 
 ## Desired experience
 
+- **Workspace visual reference:** the approved oversized study in
+  `examples/workspace_study.rs` and its assets is the current source of truth
+  for the dimensional numerals, transparent glass-like capsules, warm hover
+  and selected treatments, and press-scale interaction. Check the scaled bar
+  in the VM before treating it as finished; the illustrated reflections are
+  not a claim of live compositor blur or refraction.
+- **Approved bar mockup:** the current static bar is the visual baseline for
+  the functional implementation. Its workspace selection, clock and power
+  actions are mock-only; preserve the approved appearance while connecting
+  real behavior in the subsequent slices.
 - Elegant macOS-inspired appearance, **not necessarily a literal macOS clone**: carefully tuned typography, subtle translucency *if technically feasible*, spacing, rounded popover, restrained animations, polished hover/active states.
 - Calm and unobtrusive; keep niri in charge of window management and workspace animations.
 - Top-edge bar with appropriate Wayland layer-shell anchoring and reserved space (avoid overlapping tiled windows).

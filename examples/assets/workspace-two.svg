@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="220" viewBox="0 0 200 220">
+  <defs>
+    <path id="two" d="M47 66 Q50 32 91 32 L110 32 Q148 32 151 65 Q153 84 138 102 L91 151 L140 151 Q150 151 150 161 L150 175 Q150 184 140 184 L51 184 Q42 184 42 175 L42 161 Q42 155 47 150 L112 83 Q119 76 118 68 Q117 59 108 59 L94 59 Q84 59 82 70 Q81 78 73 80 L54 83 Q44 84 43 75 Z"/>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2d4"/><stop offset="0.55" stop-color="#bca27f"/><stop offset="1" stop-color="#715136"/></linearGradient>
+    <linearGradient id="bevel" x1="0" y1="0" x2="0.8" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="0.25" stop-color="#fff8e9"/><stop offset="0.65" stop-color="#d8c8ac"/><stop offset="1" stop-color="#a08767"/></linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf4"/><stop offset="0.2" stop-color="#fff6e5"/><stop offset="0.72" stop-color="#dfd4bf"/><stop offset="1" stop-color="#c0ad90"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <use href="#two" transform="translate(3 13)" fill="#000" opacity="0.75" filter="url(#shadow)"/>
+  <use href="#two" transform="translate(0 8)" fill="url(#side)"/>
+  <use href="#two" fill="url(#bevel)"/>
+  <use href="#two" transform="translate(2.8 3.4) scale(0.965)" fill="url(#face)"/>
+  <path d="M50 63 Q54 38 91 36 L108 36 Q143 36 147 64 Q149 79 134 96 L91 140" fill="none" stroke="#fffefa" stroke-opacity="0.9" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M121 87 L94 115 M46 163 Q46 155 54 155 L138 155 Q146 155 146 162 L146 174 Q146 180 138 180 L53 180" fill="none" stroke="#8d7456" stroke-opacity="0.62" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M88 40 L108 40 M53 160 L137 160" fill="none" stroke="#fff" stroke-opacity="0.9" stroke-width="1.4" stroke-linecap="round"/>
+</svg>
