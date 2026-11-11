@@ -9,3 +9,9 @@ engine; settle defaults through VM testing first.
 - Bar background color and opacity, including a fully transparent default;
   blur only if a real, supported compositor capability is verified.
 - Menu surface, text and border colors, plus opacity, for desktop theme matching.
+
+The current SVG artwork bakes material colors into its gradients and highlights;
+these ideas are not yet runtime-configurable. Test a small semantic palette
+approach against the approved default and a contrasting alternative before
+choosing a format or promising recoloring of all artwork. Configuration should
+be straightforward for both people and coding agents to read and edit.

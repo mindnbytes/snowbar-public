@@ -101,6 +101,37 @@ Work in small, verifiable vertical slices:
 
 Each slice must leave the bar buildable and usable. No massive speculative scaffolding.
 
+### Configuration-aware implementation
+
+We expect a small, agent-friendly, human-readable configuration file later,
+including a way to adapt the approved appearance to a user's color palette.
+This is a design constraint, **not a request to implement a parser, configuration
+GUI, theme engine, or extensive schema now**. Candidate settings live in
+`docs/configuration-candidates.md`; decide file format, locations, defaults,
+validation and reload behavior when that slice is actually planned.
+
+- As functionality is added, keep visual decisions in a small, coherent place
+  rather than spreading more literal colors and sizes through event handling.
+  Prefer a few semantic palette roles (for example surface, text, accent and
+  highlight) to making every gradient stop a separate setting.
+- The current dimensional numeral and glass SVGs contain baked-in gradients,
+  highlights and shadows. Before promising palette customization, investigate
+  a minimal, safe way to derive or render those assets from semantic colors
+  while preserving the approved appearance. Avoid blind replacement of arbitrary
+  SVG text and avoid regenerating assets in the render loop; validate with at
+  least one alternative palette and visual comparison. If fixed artwork limits
+  what can be recolored, document that limitation rather than claiming full
+  theming support.
+- The mock only supplies artwork for `0`, `1`, `2`, `3`, `4` and `9` and shows
+  four workspaces. A real clock needs every digit; niri may expose more than
+  four workspaces, multi-digit indices, or names. Complete the matching glyphs
+  and choose a readable fallback/display policy before connecting those paths;
+  never silently drop workspaces or assume four is a maximum.
+- Keep configuration, view state and side effects separate enough that a later
+  configuration layer can supply validated values without rewriting niri IPC,
+  clock or power logic. Add only the small structure justified by the current
+  slice and retain the current approved palette as the default.
+
 ### Verification
 
 - Rust formatting, Clippy, focused unit tests, and a clean build.
