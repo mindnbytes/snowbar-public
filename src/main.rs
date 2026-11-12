@@ -404,3 +404,24 @@ fn main() {
         vec![WindowSpec::from_app("snowbar", app)]
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune::{Env, Runtime};
+
+    #[test]
+    fn workspace_buttons_select_the_requested_workspace() {
+        let mut runtime = Runtime::new(State::default(), bar, (900.0, 40.0), Env::default());
+        runtime.frame(0.0);
+        for workspace in [4, 2, 1, 3] {
+            let (x, y) = runtime.find(&format!("workspace-{workspace}"))
+                .expect("workspace button");
+            runtime.pointer_move(x, y);
+            runtime.pointer_down(x, y);
+            runtime.pointer_up(x, y);
+            runtime.frame(1.0 / 60.0);
+            assert_eq!(runtime.state.workspace, workspace);
+        }
+    }
+}

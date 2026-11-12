@@ -129,3 +129,20 @@ builder leaves existing overlay options unchanged. The included temporary
 probe built on the VM, and the user confirmed reservation, menu placement and
 Escape dismissal. Full compatibility and failure handling have not been
 established; the application dependency has not yet been pinned.
+
+### Upstream integration, 2026-11-12
+
+The application subsequently pinned the fork. The integration candidate
+[`f25d805a046dda6a9d2af3431a057746b7f694f1`](https://github.com/mindnbytes/rune/commit/f25d805a046dda6a9d2af3431a057746b7f694f1)
+merges upstream `72327edc0028bc472680d11c2ee24ffea883072e` and retains the
+reserved-bar option and the offset-based keyboard keymap read. It also uses
+Apple's linker for the current macOS SDK. Its large unit-test binary linked
+with a compact-unwind size warning but failed to start because dyld could not
+load the shared cache and QuartzCore; normal macOS `cargo check` passed. The
+user confirmed that the candidate bar, reserved
+space, clicks, menu placement and Escape, and fullscreen behavior worked in
+the niri VM. Output changes, disconnects and other keyboard layouts remain
+unverified. Rune's Linux overlay unit tests were stopped due to heavy memory
+pressure; they did not pass locally, even after a reduced-debug retry. The
+repeatable checks and manual checklist are in
+[`rune-integration.md`](rune-integration.md).
