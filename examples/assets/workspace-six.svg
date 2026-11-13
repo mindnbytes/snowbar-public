@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="220" viewBox="0 0 200 220">
+  <defs>
+    <path id="six" d="M125 34 Q133 29 139 37 L149 49 Q154 55 147 61 C132 73 121 85 115 98 Q124 93 136 93 C162 93 176 111 176 138 C176 166 155 184 124 184 C89 184 68 163 68 127 C68 87 89 56 125 34 Z M122 119 C108 119 99 127 99 139 C99 151 108 159 122 159 C137 159 145 151 145 139 C145 127 137 119 122 119 Z" fill-rule="evenodd"/>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2d4"/><stop offset="0.55" stop-color="#bca27f"/><stop offset="1" stop-color="#715136"/></linearGradient>
+    <linearGradient id="bevel" x1="0" y1="0" x2="0.8" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="0.25" stop-color="#fff8e9"/><stop offset="0.65" stop-color="#d8c8ac"/><stop offset="1" stop-color="#a08767"/></linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf4"/><stop offset="0.2" stop-color="#fff6e5"/><stop offset="0.72" stop-color="#dfd4bf"/><stop offset="1" stop-color="#c0ad90"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <use href="#six" transform="translate(3 13)" fill="#000" opacity="0.75" filter="url(#shadow)"/>
+  <use href="#six" transform="translate(0 8)" fill="url(#side)"/>
+  <use href="#six" fill="url(#bevel)"/>
+  <use href="#six" transform="translate(2.8 3.4) scale(0.965)" fill="url(#face)"/>
+  <path d="M143 43 C112 63 76 91 72 125 C67 160 89 180 122 180 C153 180 172 163 172 138" fill="none" stroke="#fffefa" stroke-opacity="0.9" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M147 54 C132 67 119 80 112 95 M172 144 C169 166 151 180 125 180" fill="none" stroke="#8d7456" stroke-opacity="0.62" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M132 44 Q117 55 104 67 M104 123 C109 120 115 119 122 119" fill="none" stroke="#fff" stroke-opacity="0.9" stroke-width="1.4" stroke-linecap="round"/>
+</svg>

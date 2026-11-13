@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+niri-ipc = "=26.4.0"
 rune = { git = "https://github.com/mindnbytes/rune", rev = "90ce05442d379849679ab435950c86babb6ba9e7" }
 
 # Rune's workspace patches are not inherited by downstream applications.

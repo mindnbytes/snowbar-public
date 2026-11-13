@@ -1622,6 +1622,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "niri-ipc"
+version = "26.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a4adbddf4037ce047854d36a60b5bf80a7990b8db2f0a0b9ede7534b0bae09a"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nom"
 version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2919,6 +2929,7 @@ dependencies = [
 name = "snowbar"
 version = "0.1.0"
 dependencies = [
+ "niri-ipc",
  "rune",
 ]
 

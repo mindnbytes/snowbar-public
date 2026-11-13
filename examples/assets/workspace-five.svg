@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="220" viewBox="0 0 200 220">
+  <defs>
+    <path id="five" d="M132 32 Q141 32 141 41 L141 55 Q141 64 132 64 L83 64 L79 87 Q91 79 107 79 C137 79 154 99 154 130 C154 163 132 184 100 184 C78 184 59 176 48 160 Q42 153 49 147 L61 137 Q68 132 74 139 C81 148 90 153 101 153 C118 153 128 144 128 130 C128 115 119 107 104 107 C94 107 86 110 78 116 Q71 121 64 117 L54 111 Q48 107 50 99 L60 41 Q62 32 71 32 Z"/>
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2d4"/><stop offset="0.55" stop-color="#bca27f"/><stop offset="1" stop-color="#715136"/></linearGradient>
+    <linearGradient id="bevel" x1="0" y1="0" x2="0.8" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="0.25" stop-color="#fff8e9"/><stop offset="0.65" stop-color="#d8c8ac"/><stop offset="1" stop-color="#a08767"/></linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf4"/><stop offset="0.2" stop-color="#fff6e5"/><stop offset="0.72" stop-color="#dfd4bf"/><stop offset="1" stop-color="#c0ad90"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <use href="#five" transform="translate(3 13)" fill="#000" opacity="0.75" filter="url(#shadow)"/>
+  <use href="#five" transform="translate(0 8)" fill="url(#side)"/>
+  <use href="#five" fill="url(#bevel)"/>
+  <use href="#five" transform="translate(2.8 3.4) scale(0.965)" fill="url(#face)"/>
+  <path d="M137 37 L77 37 L66 98 Q80 83 105 83 C134 83 150 101 150 130 C150 160 130 180 100 180 C80 180 62 172 52 158" fill="none" stroke="#fffefa" stroke-opacity="0.9" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M137 44 L137 54 Q137 60 131 60 L85 60 M148 139 C145 165 128 180 103 180" fill="none" stroke="#8d7456" stroke-opacity="0.62" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M81 41 L130 41 M80 91 Q91 85 102 85" fill="none" stroke="#fff" stroke-opacity="0.9" stroke-width="1.4" stroke-linecap="round"/>
+</svg>
