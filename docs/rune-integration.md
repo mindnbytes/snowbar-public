@@ -35,9 +35,9 @@ when changing macOS-specific configuration or when developing Rune on a Mac;
 they are not a prerequisite for every Linux-only integration. In those cases,
 check the Rune checkout with `cargo check -p rune --example snowbar_probe`.
 When changing the macOS linker, also consider building or running Rune's unit
-tests to check large-binary linking. The fork uses Apple's linker for
-compatibility with current SDKs; very large test binaries may still require a
-compatible LLD and SDK. Never disable compact unwind as a workaround.
+tests to check large-binary linking. Upstream no longer forces LLD, so the fork
+uses the normal platform linker; very large macOS test binaries may still
+require a compatible LLD and SDK. Never disable compact unwind as a workaround.
 
 ## Niri VM checklist
 

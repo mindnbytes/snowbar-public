@@ -146,3 +146,13 @@ unverified. Rune's Linux overlay unit tests were stopped due to heavy memory
 pressure; they did not pass locally, even after a reduced-debug retry. The
 repeatable checks and manual checklist are in
 [`rune-integration.md`](rune-integration.md).
+
+### Upstream integration, 2026-11-13
+
+Fork commit `90ce05442d379849679ab435950c86babb6ba9e7` merges upstream
+`9d57825b`, retaining the reserved-bar and keyboard patches. Upstream removed
+the forced macOS LLD setting, so the fork-specific linker configuration was
+removed as well. Snowbar's Linux checks and tests and the Rune macOS check
+passed against the candidate. The user confirmed that the bar and its
+interactions worked as before in the niri VM. Rune's large unit tests were not
+run; output changes, disconnects and other keyboard layouts remain unverified.
