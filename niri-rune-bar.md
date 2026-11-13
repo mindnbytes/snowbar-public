@@ -24,6 +24,10 @@ No other widgets in v1. Specifically: no tray, notifications, network/audio cont
   and selected treatments, and press-scale interaction. Check the scaled bar
   in the VM before treating it as finished; the illustrated reflections are
   not a claim of live compositor blur or refraction.
+- **Rune visual research:** The user preferred the SVG capsule and numeral in
+  the exploratory geometry comparison. Keep that artwork as the baseline while
+  improving semantic colors, layout and accessibility; see
+  `docs/rune-visual-notes.md` for the concise findings and limitations.
 - **Approved bar mockup:** the current static bar is the visual baseline for
   the functional implementation. Its workspace selection, clock and power
   actions are mock-only; preserve the approved appearance while connecting
