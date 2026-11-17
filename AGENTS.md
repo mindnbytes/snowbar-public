@@ -10,6 +10,9 @@
   Keep the bar project separate from the VM configuration and do not modify
   a live session or invoke power actions without explicit approval. See
   `docs/rune-integration.md` for Rune-specific checks and resource limits.
+  Never compile or run the full Rune test suite or heavy `--all-targets` test
+  links on the local Mac or VM without explicit user approval, as neither
+  machine has enough RAM for those large test binaries.
 - Work in small, verifiable slices and pause at meaningful review points. Keep
   the approved visuals and future palette configurability in mind without
   building speculative infrastructure.

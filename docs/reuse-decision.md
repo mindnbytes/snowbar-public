@@ -174,3 +174,15 @@ The user reported the temporary candidate worked as expected in the niri VM;
 individual checklist observations were not recorded. Rune's large unit-test
 binary was not run due to the previously observed memory pressure. Output
 changes, disconnects and other keyboard layouts remain unverified.
+
+Fork commit [`09677837047eefdbae27bd4690a6a7ea9453aaf1`](https://github.com/mindnbytes/rune/commit/09677837047eefdbae27bd4690a6a7ea9453aaf1)
+(`snowbar/upstream-2026-11-17`) subsequently merges upstream
+[`cca5df6fafb4721d96fe105f126ebfd2ec351bb6`](https://github.com/anomalyco/rune/commit/cca5df6fafb4721d96fe105f126ebfd2ec351bb6)
+into `99fa00ea05e46c6f6dbe0118f9ad07957d4cca93`, preserving the reserved-bar
+option, offset-based keymap read, and Wayland layer-shell scroll input
+forwarding. Issues [#138](https://github.com/anomalyco/rune/issues/138) and
+[#319](https://github.com/anomalyco/rune/issues/319) remain open and
+unimplemented upstream. `cargo check -p rune --example snowbar_probe` and the
+Linux VM `--bin snowbar` build passed, and the user visually verified the bar
+and its interactions in the niri VM with no regressions. Heavy test suites were
+intentionally skipped on the local Mac and VM due to memory constraints.

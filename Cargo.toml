@@ -5,12 +5,12 @@ edition = "2024"
 
 [dependencies]
 niri-ipc = "=26.4.0"
-rune = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "99fa00ea05e46c6f6dbe0118f9ad07957d4cca93" }
+rune = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "09677837047eefdbae27bd4690a6a7ea9453aaf1" }
 
 # Rune's workspace patches are not inherited by downstream applications.
 [patch.crates-io]
-wgpu-hal = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "99fa00ea05e46c6f6dbe0118f9ad07957d4cca93" }
-winit = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "99fa00ea05e46c6f6dbe0118f9ad07957d4cca93" }
-parley_engine = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "99fa00ea05e46c6f6dbe0118f9ad07957d4cca93" }
-accesskit_windows = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "99fa00ea05e46c6f6dbe0118f9ad07957d4cca93" }
-accesskit_macos = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "99fa00ea05e46c6f6dbe0118f9ad07957d4cca93" }
+wgpu-hal = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "09677837047eefdbae27bd4690a6a7ea9453aaf1" }
+winit = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "09677837047eefdbae27bd4690a6a7ea9453aaf1" }
+parley_engine = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "09677837047eefdbae27bd4690a6a7ea9453aaf1" }
+accesskit_windows = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "09677837047eefdbae27bd4690a6a7ea9453aaf1" }
+accesskit_macos = { git = "ssh://git@github.com/mindnbytes/rune.git", rev = "09677837047eefdbae27bd4690a6a7ea9453aaf1" }
