@@ -1,12 +1,15 @@
 use rune::tok::motion;
 use rune::{
-    Align, App, AppSpec, Color, Cx, El, Image, ImageCache, Key, KeyEvent, KeyPolicy, OverlayInput,
-    OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, TextStyle, Tx, WindowSpec, col, el,
-    row, text,
+    Align, App, AppSpec, Color, Cx, DisplayTarget, El, Image, ImageCache, Key, KeyEvent, KeyPolicy,
+    NativeDisplayId, OverlayInput, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge,
+    TextStyle, Tx, WindowSpec, col, el, row, text,
 };
+use snowbar::niri::NiriClient;
+use snowbar::workspaces::{DisplaySnapshot, WorkspaceItem, WorkspaceState};
 use std::sync::{
     Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
+    mpsc,
 };
 
 const INK: Color = Color {
@@ -48,11 +51,13 @@ const WARM: Color = Color {
 };
 const LABEL: TextStyle = TextStyle::new(15.5, 700.0);
 const SECONDARY: TextStyle = TextStyle::new(15.5, 400.0);
+const FALLBACK_DIGIT: TextStyle = TextStyle::new(13.0, 700.0);
+const WORKSPACE_AREA_WIDTH: f32 = 300.0;
 
+#[derive(Default)]
 struct State {
-    workspace: usize,
     confirmation: Option<&'static str>,
-    hovered_workspace: Option<usize>,
+    hovered_workspace: Option<u64>,
     hovered_clock: bool,
     hovered_power: bool,
     cache: Option<ImageCache>,
@@ -61,30 +66,18 @@ struct State {
     clock_zero: Option<Image>,
     clock_nine: Option<Image>,
     power_art: Option<Image>,
+    /// Artwork for indices 0..=9; higher indices use a readable text fallback.
     numerals: Vec<Image>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            workspace: 1,
-            confirmation: None,
-            hovered_workspace: None,
-            hovered_clock: false,
-            hovered_power: false,
-            cache: None,
-            glass: None,
-            clock_glass: None,
-            clock_zero: None,
-            clock_nine: None,
-            power_art: None,
-            numerals: Vec::new(),
-        }
-    }
+    workspaces: WorkspaceState,
+    focus_tx: Option<mpsc::Sender<snowbar::workspaces::FocusIntent>>,
+    /// Owns the IPC worker threads and the ordered message channel.
+    ipc: Option<NiriClient>,
 }
 
 static MENU: OnceLock<Mutex<Option<rune::OverlayHandle<State>>>> = OnceLock::new();
 static MENU_OPEN: AtomicBool = AtomicBool::new(false);
+/// Rune's startup display snapshot, handed to the IPC worker by `setup`.
+static DISPLAYS: OnceLock<Vec<DisplaySnapshot>> = OnceLock::new();
 
 fn menu_handle() -> Option<rune::OverlayHandle<State>> {
     MENU.get()?.lock().ok()?.clone()
@@ -97,72 +90,105 @@ fn clock_digit(image: Option<&Image>) -> El {
     }
 }
 
-fn bar(state: &State, _: &mut Cx<State>) -> El {
-    let mut workspaces = row().gap(2.0).h(40.0).items_center();
-    for i in 1..=4 {
-        let active = state.workspace == i;
-        let hovered = state.hovered_workspace == Some(i);
-        let glass = match &state.glass {
-            Some(image) => el()
-                .size(38.0, 38.0)
-                .pixels(image.pixels())
-                .absolute(0.0, 0.0),
-            None => el().size(38.0, 38.0).absolute(0.0, 0.0),
-        };
-        let numeral = match state.numerals.get(i - 1) {
-            Some(image) => el().size(25.0, 27.5).pixels(image.pixels()),
-            None => el().size(25.0, 27.5),
-        };
-        workspaces = workspaces.child(
-            el().key(format!("workspace-{i}"))
-                .size(38.0, 38.0)
-                .center()
-                .radius(10.0)
-                .fill(Color::TRANSPARENT)
-                .shadow(
-                    0.0,
-                    5.0,
-                    if active || hovered {
-                        WARM.alpha(0.50)
-                    } else {
-                        Color::TRANSPARENT
-                    },
-                )
-                .press_scale(0.95)
-                .motion(motion::SNAPPY)
-                .child(
-                    el().size(34.0, 34.0)
-                        .radius(10.0)
-                        .fill(if active {
-                            WARM.alpha(0.72)
-                        } else {
-                            Color::TRANSPARENT
-                        })
-                        .absolute(2.0, 2.0),
-                )
-                .child(glass)
-                .child(
-                    el().size(30.0, 30.0)
-                        .radius(9.0)
-                        .fill(if hovered {
-                            WARM.alpha(0.18)
-                        } else {
-                            Color::TRANSPARENT
-                        })
-                        .absolute(4.0, 4.0),
-                )
-                .child(numeral)
-                .on_hover_change(move |s: &mut State, inside, _| {
-                    if inside {
-                        s.hovered_workspace = Some(i);
-                    } else if s.hovered_workspace == Some(i) {
-                        s.hovered_workspace = None;
-                    }
-                })
-                .on_press(move |s: &mut State| s.workspace = i),
-        );
+/// The approved numeral artwork for 0..=9, or a readable numeric label for
+/// multi-digit/missing glyphs. No workspace is ever dropped for lack of art.
+fn workspace_numeral(state: &State, index: u8) -> El {
+    match state.numerals.get(usize::from(index)) {
+        Some(image) => el().size(25.0, 27.5).pixels(image.pixels()),
+        None => el()
+            .size(30.0, 27.5)
+            .center()
+            .child(text(index.to_string()).font(FALLBACK_DIGIT).color(INK)),
     }
+}
 
+fn workspace_button(state: &State, item: WorkspaceItem) -> El {
+    let id = item.id;
+    let active = item.is_active;
+    let hovered = state.hovered_workspace == Some(id);
+    let glass = match &state.glass {
+        Some(image) => el()
+            .size(38.0, 38.0)
+            .pixels(image.pixels())
+            .absolute(0.0, 0.0),
+        None => el().size(38.0, 38.0).absolute(0.0, 0.0),
+    };
+    el().key(format!("workspace-{id}"))
+        .size(38.0, 38.0)
+        .center()
+        .radius(10.0)
+        .fill(Color::TRANSPARENT)
+        .shadow(
+            0.0,
+            5.0,
+            if active || hovered {
+                WARM.alpha(0.50)
+            } else {
+                Color::TRANSPARENT
+            },
+        )
+        .press_scale(0.95)
+        .motion(motion::SNAPPY)
+        .child(
+            el().size(34.0, 34.0)
+                .radius(10.0)
+                .fill(if active {
+                    WARM.alpha(0.72)
+                } else {
+                    Color::TRANSPARENT
+                })
+                .absolute(2.0, 2.0),
+        )
+        .child(glass)
+        .child(
+            el().size(30.0, 30.0)
+                .radius(9.0)
+                .fill(if hovered {
+                    WARM.alpha(0.18)
+                } else {
+                    Color::TRANSPARENT
+                })
+                .absolute(4.0, 4.0),
+        )
+        .child(workspace_numeral(state, item.index))
+        .on_hover_change(move |s: &mut State, inside, _| {
+            if inside {
+                s.hovered_workspace = Some(id);
+            } else if s.hovered_workspace == Some(id) {
+                s.hovered_workspace = None;
+            }
+        })
+        .on_press(move |s: &mut State| {
+            if let (Some(tx), Some(intent)) = (s.focus_tx.as_ref(), s.workspaces.focus_action(id)) {
+                let _ = tx.send(intent);
+            }
+        })
+}
+
+/// Keep the scrollable workspace strip bounded away from the clock.
+fn workspace_area(state: &State) -> El {
+    if !state.workspaces.is_available() {
+        return el()
+            .key("workspaces-unavailable")
+            .w(WORKSPACE_AREA_WIDTH)
+            .h(40.0)
+            .center()
+            .child(text("niri unavailable").font(SECONDARY).color(MUTED));
+    }
+    let mut strip = row().gap(2.0).h(40.0).items_center();
+    for item in state.workspaces.view() {
+        strip = strip.child(workspace_button(state, item));
+    }
+    row()
+        .key("workspaces-scroll")
+        .w(WORKSPACE_AREA_WIDTH)
+        .h(40.0)
+        .scroll_x()
+        .scroll_edge_fade(12.0)
+        .child(strip)
+}
+
+fn bar(state: &State, _: &mut Cx<State>) -> El {
     let power = el()
         .key("power")
         .size(38.0, 38.0)
@@ -220,7 +246,7 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
         .px(18.0)
         .items_center()
         .fill(Color::TRANSPARENT)
-        .child(row().w(220.0).child(workspaces))
+        .child(row().w(WORKSPACE_AREA_WIDTH).child(workspace_area(state)))
         .child(
             row().grow(1.0).items_center().justify_center().child(
                 el().key("clock")
@@ -268,13 +294,13 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
                                     .child(el().size(3.0, 3.0).radius(1.5).fill(PAPER))
                                     .absolute(40.0, 10.0),
                             )
-                            .child(clock_digit(state.numerals.get(3)).absolute(43.0, 0.0))
-                            .child(clock_digit(state.numerals.first()).absolute(60.0, 0.0)),
+                            .child(clock_digit(state.numerals.get(4)).absolute(43.0, 0.0))
+                            .child(clock_digit(state.numerals.get(1)).absolute(60.0, 0.0)),
                     )
                     .on_hover_change(|s: &mut State, hovered, _| s.hovered_clock = hovered),
             ),
         )
-        .child(row().w(220.0).justify_end().child(power))
+        .child(row().w(WORKSPACE_AREA_WIDTH).justify_end().child(power))
 }
 
 fn menu(state: &State, _: &mut Cx<State>) -> El {
@@ -333,53 +359,113 @@ fn menu_key(_: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
     }
 }
 
+fn setup(state: &mut State, wake: rune::Waker) {
+    let cache = state.cache.insert(ImageCache::new(wake.clone()));
+    state.glass = Some(cache.svg(
+        &include_bytes!("../examples/assets/workspace-glass.svg")[..],
+        320.0,
+        2.0,
+    ));
+    state.clock_glass = Some(cache.svg(
+        &include_bytes!("../examples/assets/clock-glass.svg")[..],
+        600.0,
+        2.0,
+    ));
+    state.clock_zero = Some(cache.svg(
+        &include_bytes!("../examples/assets/workspace-zero.svg")[..],
+        220.0,
+        2.0,
+    ));
+    state.clock_nine = Some(cache.svg(
+        &include_bytes!("../examples/assets/workspace-nine.svg")[..],
+        220.0,
+        2.0,
+    ));
+    state.power_art = Some(cache.svg(
+        &include_bytes!("../examples/assets/power.svg")[..],
+        220.0,
+        2.0,
+    ));
+    state.numerals = [
+        &include_bytes!("../examples/assets/workspace-zero.svg")[..],
+        &include_bytes!("../examples/assets/workspace-one.svg")[..],
+        &include_bytes!("../examples/assets/workspace-two.svg")[..],
+        &include_bytes!("../examples/assets/workspace-three.svg")[..],
+        &include_bytes!("../examples/assets/workspace-four.svg")[..],
+        &include_bytes!("../examples/assets/workspace-five.svg")[..],
+        &include_bytes!("../examples/assets/workspace-six.svg")[..],
+        &include_bytes!("../examples/assets/workspace-seven.svg")[..],
+        &include_bytes!("../examples/assets/workspace-eight.svg")[..],
+        &include_bytes!("../examples/assets/workspace-nine.svg")[..],
+    ]
+    .into_iter()
+    .map(|svg| cache.svg(svg, 220.0, 2.0))
+    .collect();
+
+    if let Some(displays) = DISPLAYS.get() {
+        let client = NiriClient::start(displays.clone(), wake);
+        state.focus_tx = Some(client.focus_sender());
+        state.ipc = Some(client);
+    }
+}
+
+/// Apply IPC messages on the UI thread. Rune calls `poll` at the start of a
+/// frame; the worker wakes the overlay when a message arrives, so no busy loop.
+fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
+    let Some(ipc) = state.ipc.as_ref() else {
+        return false;
+    };
+    let messages = ipc.drain();
+    if messages.is_empty() {
+        return false;
+    }
+    let before = state.workspaces.clone();
+    for message in messages {
+        state.workspaces.apply(message);
+    }
+    let changed = state.workspaces != before;
+    if changed {
+        tx.instant();
+    }
+    changed
+}
+
 fn main() {
-    rune::run_windows(|_| {
+    rune::run_windows(|displays| {
+        let wayland_displays: Vec<_> = displays
+            .iter()
+            .filter(|display| matches!(display.native_id(), Some(NativeDisplayId::Wayland(_))))
+            .collect();
+        // Strict single-output policy: only one targetable Rune display may
+        // host the bar. Otherwise fail closed and show no bar at all.
+        let single_target = (wayland_displays.len() == 1)
+            .then(|| wayland_displays[0].id.clone())
+            .flatten();
+        let snapshots: Vec<DisplaySnapshot> = displays
+            .iter()
+            .map(|display| DisplaySnapshot {
+                wayland_id: match display.native_id() {
+                    Some(NativeDisplayId::Wayland(id)) => Some(id),
+                    _ => None,
+                },
+            })
+            .collect();
+
         let mut app =
             App::new(AppSpec::new("Snowbar", (900.0, 40.0), State::default, bar)).windowless();
+        let options = OverlayOptions {
+            input: OverlayInput::All,
+            display: match &single_target {
+                Some(id) => DisplayTarget::Id(id.clone()),
+                None => DisplayTarget::Primary,
+            },
+            ..Default::default()
+        };
         let bar_overlay = app.overlay(
             OverlaySpec::new("snowbar", (900.0, 40.0), bar)
-                .options(OverlayOptions {
-                    input: OverlayInput::All,
-                    ..Default::default()
-                })
-                .setup(|state, waker| {
-                    let cache = state.cache.insert(ImageCache::new(waker));
-                    state.glass = Some(cache.svg(
-                        &include_bytes!("../examples/assets/workspace-glass.svg")[..],
-                        320.0,
-                        2.0,
-                    ));
-                    state.clock_glass = Some(cache.svg(
-                        &include_bytes!("../examples/assets/clock-glass.svg")[..],
-                        600.0,
-                        2.0,
-                    ));
-                    state.clock_zero = Some(cache.svg(
-                        &include_bytes!("../examples/assets/workspace-zero.svg")[..],
-                        220.0,
-                        2.0,
-                    ));
-                    state.clock_nine = Some(cache.svg(
-                        &include_bytes!("../examples/assets/workspace-nine.svg")[..],
-                        220.0,
-                        2.0,
-                    ));
-                    state.power_art = Some(cache.svg(
-                        &include_bytes!("../examples/assets/power.svg")[..],
-                        220.0,
-                        2.0,
-                    ));
-                    state.numerals = [
-                        &include_bytes!("../examples/assets/workspace-one.svg")[..],
-                        &include_bytes!("../examples/assets/workspace-two.svg")[..],
-                        &include_bytes!("../examples/assets/workspace-three.svg")[..],
-                        &include_bytes!("../examples/assets/workspace-four.svg")[..],
-                    ]
-                    .into_iter()
-                    .map(|svg| cache.svg(svg, 220.0, 2.0))
-                    .collect();
-                })
+                .options(options)
+                .setup(setup)
+                .poll(poll)
                 .wayland_top_reserved(40),
             State::default(),
         );
@@ -400,7 +486,11 @@ fn main() {
             State::default(),
         );
         let _ = MENU.set(Mutex::new(Some(menu_overlay)));
-        bar_overlay.show();
+
+        if single_target.is_some() {
+            let _ = DISPLAYS.set(snapshots);
+            bar_overlay.show();
+        }
         vec![WindowSpec::from_app("snowbar", app)]
     });
 }
@@ -408,20 +498,84 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use niri_ipc::Workspace;
     use rune::{Env, Runtime};
+    use snowbar::workspaces::IpcMessage;
+
+    fn ready_state(entries: &[(u64, u8, bool)]) -> State {
+        let mut state = State::default();
+        state.workspaces.apply(IpcMessage::Ready {
+            generation: 1,
+            output: "Virtual-1".to_owned(),
+            workspaces: entries
+                .iter()
+                .map(|(id, idx, active)| Workspace {
+                    id: *id,
+                    idx: *idx,
+                    name: None,
+                    output: Some("Virtual-1".to_owned()),
+                    is_urgent: false,
+                    is_active: *active,
+                    is_focused: *active,
+                    active_window_id: None,
+                })
+                .collect(),
+        });
+        state
+    }
 
     #[test]
-    fn workspace_buttons_select_the_requested_workspace() {
-        let mut runtime = Runtime::new(State::default(), bar, (900.0, 40.0), Env::default());
+    fn clicking_a_workspace_sends_its_stable_id_from_a_fresh_snapshot() {
+        let (tx, rx) = mpsc::channel();
+        let mut state = ready_state(&[(7, 1, true), (8, 2, false)]);
+        state.focus_tx = Some(tx);
+        let mut runtime = Runtime::new(state, bar, (900.0, 40.0), Env::default());
         runtime.frame(0.0);
-        for workspace in [4, 2, 1, 3] {
-            let (x, y) = runtime.find(&format!("workspace-{workspace}"))
-                .expect("workspace button");
-            runtime.pointer_move(x, y);
-            runtime.pointer_down(x, y);
-            runtime.pointer_up(x, y);
-            runtime.frame(1.0 / 60.0);
-            assert_eq!(runtime.state.workspace, workspace);
-        }
+        let (x, y) = runtime.find("workspace-8").expect("workspace button");
+        runtime.pointer_move(x, y);
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        runtime.frame(1.0 / 60.0);
+        let intent = rx.try_recv().expect("focus intent");
+        assert_eq!(intent.workspace_id, 8);
+        assert_eq!(intent.generation, 1);
+    }
+
+    #[test]
+    fn unavailable_state_shows_no_clickable_workspaces() {
+        let (tx, rx) = mpsc::channel();
+        let mut state = State::default();
+        state.focus_tx = Some(tx);
+        let mut runtime = Runtime::new(state, bar, (900.0, 40.0), Env::default());
+        runtime.frame(0.0);
+        assert!(runtime.find("workspaces-unavailable").is_some());
+        assert!(runtime.find("workspace-1").is_none());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn scrolling_reaches_trailing_workspace_without_overlapping_clock() {
+        let entries: Vec<(u64, u8, bool)> = (1..=12).map(|i| (i as u64, i as u8, i == 1)).collect();
+        let (tx, rx) = mpsc::channel();
+        let mut state = ready_state(&entries);
+        state.focus_tx = Some(tx);
+        let mut runtime = Runtime::new(state, bar, (900.0, 40.0), Env::default());
+        runtime.frame(0.0);
+        let (strip, _) = runtime.presented("workspaces-scroll").unwrap();
+        let (clock, _) = runtime.presented("clock").unwrap();
+        assert!(
+            strip[0] + strip[2] <= clock[0],
+            "strip must not overlap clock"
+        );
+        let before = runtime.find("workspace-12").unwrap().0;
+        runtime.wheel_xy(strip[0] + 50.0, strip[1] + 20.0, -600.0, 0.0);
+        runtime.frame(1.0 / 60.0);
+        let (x, y) = runtime.find("workspace-12").expect("trailing workspace");
+        assert!(x < before && x >= strip[0] && x < strip[0] + strip[2]);
+        runtime.pointer_move(x, y);
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        runtime.frame(1.0 / 60.0);
+        assert_eq!(rx.try_recv().unwrap().workspace_id, 12);
     }
 }

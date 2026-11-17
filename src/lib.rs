@@ -1,3 +1,4 @@
-//! Pure application state, independent of the Rune view and IPC effects.
+//! Application state and the niri IPC effect adapter, independent of the Rune view.
 
+pub mod niri;
 pub mod workspaces;

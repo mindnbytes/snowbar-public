@@ -38,7 +38,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.27.2"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -69,7 +69,7 @@ dependencies = [
 [[package]]
 name = "accesskit_windows"
 version = "0.35.2"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -2169,7 +2169,7 @@ checksum = "9c4482d912d7671a7cd2089794f90ef3bb5f5f8c738230fb0fcd50fa020f0ed3"
 [[package]]
 name = "parley_engine"
 version = "0.12.0"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "fontique",
  "harfrust",
@@ -2553,7 +2553,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2610,7 +2610,7 @@ dependencies = [
  "swash",
  "symphonia",
  "taffy",
- "tiny-skia-path 0.11.4 (git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee)",
+ "tiny-skia-path 0.11.4 (git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93)",
  "tokio",
  "unicode-segmentation",
  "wasm-bindgen",
@@ -2638,12 +2638,12 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 
 [[package]]
 name = "rune-staging"
 version = "0.0.1"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "wgpu",
 ]
@@ -2651,7 +2651,7 @@ dependencies = [
 [[package]]
 name = "rune-taffy"
 version = "0.0.1"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "taffy",
 ]
@@ -3238,7 +3238,7 @@ dependencies = [
 [[package]]
 name = "tiny-skia-path"
 version = "0.11.4"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "arrayref",
  "bytemuck",
@@ -3737,7 +3737,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.1"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -4019,7 +4019,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "git+https://github.com/mindnbytes/rune?rev=96001408366ff226181b18ce69f904a897e5b3ee#96001408366ff226181b18ce69f904a897e5b3ee"
+source = "git+ssh://git@github.com/mindnbytes/rune.git?rev=99fa00ea05e46c6f6dbe0118f9ad07957d4cca93#99fa00ea05e46c6f6dbe0118f9ad07957d4cca93"
 dependencies = [
  "ahash",
  "android-activity",

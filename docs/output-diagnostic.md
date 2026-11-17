@@ -1,7 +1,13 @@
 # Rune and niri output diagnostic
 
-Diagnostic checkpoint, not an implemented output-selection policy. Rune is
-pinned at `90ce05442d379849679ab435950c86babb6ba9e7` and `niri-ipc` at
+Implementation note: the workspace candidate attempts the cardinality policy
+below, but does not satisfy all its fail-closed requirements. See
+`docs/workspace-policy.md` and `docs/rune-output-investigation.md` for the
+known gaps and single-monitor v1 preference. These diagnostic findings are not
+a live placement or hotplug test.
+
+At the time of this diagnostic, Rune was pinned at
+`90ce05442d379849679ab435950c86babb6ba9e7` and `niri-ipc` at
 `26.4.0`. `examples/display_diagnostic.rs` prints Rune's startup display
 snapshot and creates no window or layer surface. Run it in a graphical session
 with `nix develop --command cargo run --locked --example display_diagnostic`;
