@@ -156,3 +156,21 @@ removed as well. Snowbar's Linux checks and tests and the Rune macOS check
 passed against the candidate. The user confirmed that the bar and its
 interactions worked as before in the niri VM. Rune's large unit tests were not
 run; output changes, disconnects and other keyboard layouts remain unverified.
+
+### Upstream integration, 2026-11-17
+
+Fork commit [`96001408366ff226181b18ce69f904a897e5b3ee`](https://github.com/mindnbytes/rune/commit/96001408366ff226181b18ce69f904a897e5b3ee)
+merges upstream [`55ef5268f22038a95344b3e9d2b4a25ddba731b1`](https://github.com/anomalyco/rune/commit/55ef5268f22038a95344b3e9d2b4a25ddba731b1)
+and retains the reserved-bar option and offset-based keymap read. Upstream
+issue [#138](https://github.com/anomalyco/rune/issues/138) proposes a more
+general reservation API; it is not implemented at that upstream revision.
+Issue [#319](https://github.com/anomalyco/rune/issues/319) describes the
+keymap issue and offset-based fix. Upstream added a vendored `accesskit_macos`
+patch, so Snowbar includes it alongside its other Cargo patches.
+
+Snowbar's locked Linux all-target checks and tests passed in the pinned Nix
+shell with two build jobs, and the Rune macOS probe check passed with warnings.
+The user reported the temporary candidate worked as expected in the niri VM;
+individual checklist observations were not recorded. Rune's large unit-test
+binary was not run due to the previously observed memory pressure. Output
+changes, disconnects and other keyboard layouts remain unverified.

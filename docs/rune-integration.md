@@ -1,7 +1,7 @@
 # Rune integration checks
 
 Run these checks for every candidate Rune update before updating the application
-pin. The application and all four Cargo patches must point at the same tested
+pin. The application and all five Cargo patches must point at the same tested
 fork revision; Rune's workspace patches are not inherited by applications.
 
 ## Automated checks
@@ -38,6 +38,18 @@ When changing the macOS linker, also consider building or running Rune's unit
 tests to check large-binary linking. Upstream no longer forces LLD, so the fork
 uses the normal platform linker; very large macOS test binaries may still
 require a compatible LLD and SDK. Never disable compact unwind as a workaround.
+
+### Temporary VM checkout and Nix source copying
+
+If a candidate is copied to the VM without its Git metadata, running
+`nix develop` from that directory can copy the entire directory into the Nix
+store, including an existing `target/` build tree. This can look like a stalled
+launch and consume substantial disk space. For repeated commands, use a
+separate small directory containing copies of the candidate's pinned
+`flake.nix` and `flake.lock`, and run `nix develop /path/to/that-directory
+--command ...` from the candidate directory. Verify the copies match the
+candidate's files. This still uses the project's pinned shell while keeping
+build output out of the flake source; do not substitute the host toolchain.
 
 ## Niri VM checklist
 
