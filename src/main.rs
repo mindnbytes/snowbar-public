@@ -4,6 +4,7 @@ use rune::{
     KeyPolicy, NativeDisplayId, OverlayInput, OverlayOptions, OverlayPlacement, OverlaySpec,
     ScreenEdge, TextStyle, Tx, WindowSpec, col, el, row, text,
 };
+use snowbar::clock::{self, ClockTime};
 use snowbar::niri::NiriClient;
 use snowbar::workspaces::{DisplaySnapshot, WorkspaceItem, WorkspaceState};
 use std::sync::{
@@ -53,6 +54,9 @@ const LABEL: TextStyle = TextStyle::new(15.5, 700.0);
 const SECONDARY: TextStyle = TextStyle::new(15.5, 400.0);
 const FALLBACK_DIGIT: TextStyle = TextStyle::new(13.0, 700.0);
 const WORKSPACE_AREA_WIDTH: f32 = 300.0;
+/// Approved clock glyph slots, left to right: H tens, H ones, M tens, M ones.
+/// The colon sits at x = 40 between the second and third slots.
+const CLOCK_DIGIT_X: [f32; 4] = [0.0, 17.0, 43.0, 60.0];
 
 #[derive(Default)]
 struct State {
@@ -62,15 +66,18 @@ struct State {
     cache: Option<ImageCache>,
     glass: Option<Image>,
     clock_glass: Option<Image>,
-    clock_zero: Option<Image>,
-    clock_nine: Option<Image>,
     power_art: Option<Image>,
+    /// Committed local time and the deadline of its next minute sample.
+    clock: clock::Display,
     /// Artwork for indices 0..=9; higher indices use a readable text fallback.
     numerals: Vec<Image>,
     workspaces: WorkspaceState,
     focus_tx: Option<mpsc::Sender<snowbar::workspaces::FocusIntent>>,
     /// Owns the IPC worker threads and the ordered message channel.
     ipc: Option<NiriClient>,
+    /// Fixed observations for headless tests; production samples the system.
+    #[cfg(test)]
+    clock_samples: std::collections::VecDeque<clock::Sample>,
 }
 
 static MENU: OnceLock<Mutex<Option<rune::OverlayHandle<State>>>> = OnceLock::new();
@@ -87,6 +94,18 @@ fn clock_digit(image: Option<&Image>) -> El {
         Some(image) => el().size(25.0, 27.5).pixels(image.pixels()),
         None => el().size(25.0, 27.5),
     }
+}
+
+/// One approved clock slot. Without a committed sample the slot stays an empty
+/// 25×27.5 box, so the capsule and spacing never move. The digits reuse the
+/// 0–9 artwork; no clock-specific zero or nine is cached.
+fn clock_slot(state: &State, slot: usize) -> El {
+    let digit = state
+        .clock
+        .shown()
+        .map(ClockTime::digits)
+        .map(|digits| digits[slot]);
+    clock_digit(digit.and_then(|digit| state.numerals.get(usize::from(digit))))
 }
 
 /// The approved numeral artwork for 0..=9, or a readable numeric label for
@@ -292,8 +311,8 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
                     )
                     .child(
                         el().size(85.0, 27.5)
-                            .child(clock_digit(state.clock_zero.as_ref()).absolute(0.0, 0.0))
-                            .child(clock_digit(state.clock_nine.as_ref()).absolute(17.0, 0.0))
+                            .child(clock_slot(state, 0).absolute(CLOCK_DIGIT_X[0], 0.0))
+                            .child(clock_slot(state, 1).absolute(CLOCK_DIGIT_X[1], 0.0))
                             .child(
                                 col()
                                     .w(4.0)
@@ -303,8 +322,8 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
                                     .child(el().size(3.0, 3.0).radius(1.5).fill(PAPER))
                                     .absolute(40.0, 10.0),
                             )
-                            .child(clock_digit(state.numerals.get(4)).absolute(43.0, 0.0))
-                            .child(clock_digit(state.numerals.get(1)).absolute(60.0, 0.0)),
+                            .child(clock_slot(state, 2).absolute(CLOCK_DIGIT_X[2], 0.0))
+                            .child(clock_slot(state, 3).absolute(CLOCK_DIGIT_X[3], 0.0)),
                     )
                     .on_hover_change(|s: &mut State, hovered, _| s.hovered_clock = hovered),
             ),
@@ -380,16 +399,6 @@ fn setup(state: &mut State, wake: rune::Waker) {
         600.0,
         2.0,
     ));
-    state.clock_zero = Some(cache.svg(
-        &include_bytes!("../examples/assets/workspace-zero.svg")[..],
-        220.0,
-        2.0,
-    ));
-    state.clock_nine = Some(cache.svg(
-        &include_bytes!("../examples/assets/workspace-nine.svg")[..],
-        220.0,
-        2.0,
-    ));
     state.power_art = Some(cache.svg(
         &include_bytes!("../examples/assets/power.svg")[..],
         220.0,
@@ -421,21 +430,43 @@ fn setup(state: &mut State, wake: rune::Waker) {
     }
 }
 
-/// Apply IPC messages on the UI thread. Rune calls `poll` at the start of a
-/// frame; the worker wakes the overlay when a message arrives, so no busy loop.
-fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
-    let Some(ipc) = state.ipc.as_ref() else {
-        return false;
-    };
-    let messages = ipc.drain();
-    if messages.is_empty() {
-        return false;
+/// Apply IPC messages and, when its minute deadline has arrived, one fresh clock
+/// sample. Rune calls `poll` at the start of a frame; IPC workers and the clock
+/// wake it through Rune. Neither source short-circuits the other, so a frame that
+/// carries both applies both. No clock read happens on frames that only carry
+/// input or unrelated IPC.
+fn poll(state: &mut State, app_clock: f64, tx: &mut Tx) -> bool {
+    let mut changed = false;
+    if let Some(ipc) = state.ipc.as_ref() {
+        let messages = ipc.drain();
+        if !messages.is_empty() {
+            changed |= apply_ipc_messages(state, messages);
+        }
     }
-    let changed = apply_ipc_messages(state, messages);
+    if state.clock.is_due(app_clock) {
+        let sample = state.next_clock_sample();
+        let advance = state.clock.advance(app_clock, sample);
+        // Schedules the poll, not a view commit: an unchanged HH:MM returns
+        // false below and runs no view.
+        tx.wake_after(advance.wait);
+        changed |= advance.changed;
+    }
     if changed {
         tx.instant();
     }
     changed
+}
+
+impl State {
+    /// The next observation: a fixed one in headless tests, otherwise the
+    /// system's current wall and local time.
+    fn next_clock_sample(&mut self) -> clock::Sample {
+        #[cfg(test)]
+        if let Some(sample) = self.clock_samples.pop_front() {
+            return sample;
+        }
+        clock::sample()
+    }
 }
 
 /// What the workspace area actually draws. A snapshot can change names,
@@ -535,6 +566,146 @@ mod tests {
     use niri_ipc::Workspace;
     use rune::{Env, Runtime};
     use snowbar::workspaces::IpcMessage;
+    use std::sync::Arc;
+
+    fn fixed_sample(second: u8, nanos: u32, hour: u8, minute: u8) -> clock::Sample {
+        clock::Sample {
+            time: ClockTime::new(hour, minute).expect("valid clock time"),
+            second,
+            nanos,
+        }
+    }
+
+    /// The production bar, setup and clock path with fixed observations. Image
+    /// assets are decoded once so the paint comparison is deterministic; no
+    /// timer is slept on and no screenshot is taken.
+    fn clock_runtime(samples: impl IntoIterator<Item = clock::Sample>) -> Runtime<State> {
+        let mut state = State {
+            clock_samples: samples.into_iter().collect(),
+            ..State::default()
+        };
+        setup(&mut state, Arc::new(|| {}));
+        let assets = state
+            .numerals
+            .iter()
+            .chain(state.glass.iter())
+            .chain(state.clock_glass.iter())
+            .chain(state.power_art.iter());
+        for image in assets {
+            image.wait().expect("decode approved artwork");
+        }
+        let mut runtime = Runtime::new(state, bar, (900.0, 40.0), Env::default());
+        runtime.poll = Some(poll);
+        runtime
+    }
+
+    #[test]
+    fn clock_shows_initial_minute_then_updates_once_at_the_boundary() {
+        // Local instants: 09:05:30.250, 09:06:00.000, 09:06:30.000 and
+        // 09:07:00.000. The third repeats the displayed minute.
+        let mut runtime = clock_runtime([
+            fixed_sample(30, 250_000_000, 9, 5),
+            fixed_sample(0, 0, 9, 6),
+            fixed_sample(30, 0, 9, 6),
+            fixed_sample(0, 0, 9, 7),
+        ]);
+        runtime.frame(0.0);
+        assert_eq!(
+            runtime.state.clock.shown(),
+            ClockTime::new(9, 5),
+            "the first frame shows the current minute, not a mock or a tick"
+        );
+        assert_eq!(runtime.state.clock.due(), Some(29.75));
+        assert_eq!(
+            runtime.state.clock_samples.len(),
+            3,
+            "the first frame samples the clock once"
+        );
+        let initial_paint = format!("{:?}", runtime.instances);
+        let initial_commits = runtime.stats.commits;
+        let capsule = runtime.presented("clock").expect("clock capsule").0;
+
+        runtime.frame(29.0);
+        assert_eq!(
+            runtime.state.clock_samples.len(),
+            3,
+            "frames before the deadline must not read the clock"
+        );
+        assert_eq!(runtime.stats.commits, initial_commits);
+        assert_eq!(format!("{:?}", runtime.instances), initial_paint);
+
+        // The coarse step crosses 09:05:30.250 + 29.750 s, the exact boundary.
+        runtime.frame(1.0);
+        assert_eq!(runtime.state.clock.shown(), ClockTime::new(9, 6));
+        assert_eq!(runtime.state.clock.due(), Some(89.75));
+        assert!(
+            runtime.stats.commits > initial_commits,
+            "new digits re-run the view"
+        );
+        assert_ne!(
+            format!("{:?}", runtime.instances),
+            initial_paint,
+            "the updated digits reach the painted view"
+        );
+        assert_eq!(
+            runtime.presented("clock").expect("clock capsule").0,
+            capsule,
+            "the 112×38 capsule keeps its geometry"
+        );
+
+        let updated_paint = format!("{:?}", runtime.instances);
+        let updated_commits = runtime.stats.commits;
+        // A fresh sample that repeats 09:06 still schedules, but commits nothing.
+        runtime.frame(60.0);
+        assert_eq!(runtime.state.clock.shown(), ClockTime::new(9, 6));
+        assert_eq!(runtime.state.clock.due(), Some(119.75));
+        assert_eq!(
+            runtime.stats.commits, updated_commits,
+            "an unchanged HH:MM must not rebuild the view"
+        );
+        assert_eq!(format!("{:?}", runtime.instances), updated_paint);
+        assert_eq!(
+            runtime.state.clock_samples.len(),
+            1,
+            "the unchanged sample consumed only its own observation"
+        );
+
+        // The unchanged poll still armed the next boundary: 09:07 at 119.75.
+        runtime.frame(60.0);
+        assert_eq!(runtime.state.clock.shown(), ClockTime::new(9, 7));
+        assert_eq!(runtime.state.clock.due(), Some(179.75));
+        assert!(runtime.stats.commits > updated_commits);
+        assert!(runtime.state.clock_samples.is_empty());
+    }
+
+    #[test]
+    fn clock_follows_discontinuous_resume_and_time_zone_samples() {
+        let mut runtime = clock_runtime([
+            fixed_sample(30, 250_000_000, 9, 5),
+            fixed_sample(0, 0, 10, 0), // forward: 09:05 -> 10:00
+            fixed_sample(0, 0, 9, 58), // backward: 10:00 -> 09:58
+            fixed_sample(0, 0, 0, 0),  // resume-like: next local midnight
+            fixed_sample(0, 0, 1, 1),  // zone-like: +01:00 offset, not replayed
+        ]);
+        runtime.frame(0.0);
+        assert_eq!(runtime.state.clock.shown(), ClockTime::new(9, 5));
+        for expected in [
+            ClockTime::new(10, 0),
+            ClockTime::new(9, 58),
+            ClockTime::new(0, 0),
+            ClockTime::new(1, 1),
+        ] {
+            let before = runtime.stats.commits;
+            runtime.frame(60.0);
+            assert_eq!(
+                runtime.state.clock.shown(),
+                expected,
+                "each absolute sample is shown as it is, never replayed"
+            );
+            assert!(runtime.stats.commits > before);
+        }
+        assert!(runtime.state.clock_samples.is_empty());
+    }
 
     fn ready_state(entries: &[(u64, u8, bool)]) -> State {
         let mut state = State::default();
@@ -677,8 +848,10 @@ mod tests {
     #[test]
     fn unavailable_state_shows_no_clickable_workspaces() {
         let (tx, rx) = mpsc::channel();
-        let mut state = State::default();
-        state.focus_tx = Some(tx);
+        let state = State {
+            focus_tx: Some(tx),
+            ..State::default()
+        };
         let mut runtime = Runtime::new(state, bar, (900.0, 40.0), Env::default());
         runtime.frame(0.0);
         assert!(runtime.find("workspaces-unavailable").is_some());
