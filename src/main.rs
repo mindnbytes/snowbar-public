@@ -6,12 +6,20 @@ use rune::{
 };
 use snowbar::clock::{self, ClockTime};
 use snowbar::niri::NiriClient;
+use snowbar::power::{
+    Dispatch, MenuState, PowerAction, PowerError, PowerEvent, PowerMenu, PowerOutcome,
+};
 use snowbar::workspaces::{DisplaySnapshot, WorkspaceItem, WorkspaceState};
 use std::sync::{
     Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
+
+/// Production-only effects. The `cfg` keeps the real niri/logind runner out of
+/// the test build entirely; tests drive the UI with fake channels instead.
+#[cfg(not(test))]
+mod power_os;
 
 const INK: Color = Color {
     r: 0.161,
@@ -58,9 +66,26 @@ const WORKSPACE_AREA_WIDTH: f32 = 300.0;
 /// The colon sits at x = 40 between the second and third slots.
 const CLOCK_DIGIT_X: [f32; 4] = [0.0, 17.0, 43.0, 60.0];
 
+/// Power popover geometry, shared by the view, its overlay and headless tests. Every
+/// sentence is wrapped to `MENU_MESSAGE_WIDTH`, so a long backend error cannot run
+/// under the right edge or push the footer out of the popover.
+const MENU_WIDTH: f32 = 246.0;
+const MENU_MIN_HEIGHT: f32 = 222.0;
+const MENU_SIDE_INSET: f32 = 8.0;
+const MENU_BOTTOM_INSET: f32 = 12.0;
+const MENU_CONTENT_PAD: f32 = 14.0;
+const MENU_GAP: f32 = 8.0;
+const MENU_ACTION_HEIGHT: f32 = 34.0;
+const MENU_FOOTER_HEIGHT: f32 = 30.0;
+/// One line of body text plus rounding. A fractional output scale can re-break a
+/// wrapped line by a few device pixels, so reserve a whole extra line rather than
+/// guessing a sub-pixel margin.
+const MENU_HEIGHT_SLACK: f32 = 20.0;
+/// Content width after the overlay inset and the card padding.
+const MENU_MESSAGE_WIDTH: f32 = MENU_WIDTH - 2.0 * (MENU_SIDE_INSET + MENU_CONTENT_PAD);
+
 #[derive(Default)]
 struct State {
-    confirmation: Option<&'static str>,
     hovered_clock: bool,
     hovered_power: bool,
     cache: Option<ImageCache>,
@@ -75,6 +100,15 @@ struct State {
     focus_tx: Option<mpsc::Sender<snowbar::workspaces::FocusIntent>>,
     /// Owns the IPC worker threads and the ordered message channel.
     ipc: Option<NiriClient>,
+    /// Pure selection/confirmation/pending/result machine.
+    power: PowerMenu,
+    /// On-demand dispatch channel to the production worker.
+    power_tx: Option<mpsc::Sender<Dispatch>>,
+    /// Worker completions drained by the power overlay's poll.
+    power_rx: Option<mpsc::Receiver<PowerEvent>>,
+    /// Set when the production worker could not start; confirmation then
+    /// fails visibly instead of pretending to dispatch.
+    power_start_error: Option<PowerError>,
     /// Fixed observations for headless tests; production samples the system.
     #[cfg(test)]
     clock_samples: std::collections::VecDeque<clock::Sample>,
@@ -256,17 +290,7 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
             None => el().size(28.0, 30.8),
         })
         .on_hover_change(|s: &mut State, hovered, _| s.hovered_power = hovered)
-        .on_press(|_: &mut State| {
-            if let Some(menu) = menu_handle() {
-                if MENU_OPEN.fetch_xor(true, Ordering::Relaxed) {
-                    menu.hide();
-                } else {
-                    menu.update(|state, _| state.confirmation = None);
-                    menu.show();
-                    menu.request_keys();
-                }
-            }
-        });
+        .on_press(|_: &mut State| toggle_power_menu());
 
     row()
         .w_full()
@@ -331,36 +355,170 @@ fn bar(state: &State, _: &mut Cx<State>) -> El {
         .child(row().w(WORKSPACE_AREA_WIDTH).justify_end().child(power))
 }
 
+/// Wrapped size of one power sentence at the shared popover width, in the exact
+/// style the view draws. `measure_with` walks Rune's actual shaping/layout
+/// (including the wrap-anywhere option the element uses), so the height the
+/// overlay reserves and the height the regression test checks are the same
+/// metric.
+fn menu_text_height(content: &str, style: TextStyle) -> f32 {
+    rune::text::measure_with(
+        content,
+        &[],
+        style,
+        Some(MENU_MESSAGE_WIDTH),
+        rune::text::RichLayoutOptions::new().wrap_anywhere(),
+    )
+    .1
+}
+
+/// The popover's size for the current state. The common states stay at the approved 246×222;
+/// a long error summary grows the surface instead of clipping the sentence or covering the
+/// footer. The view and overlay both use this function, and the headless tests build the
+/// runtime at its result.
+fn menu_size_for(state: &MenuState) -> (f32, f32) {
+    let header = menu_text_height("Power", LABEL);
+    let (body, gaps) = match state {
+        MenuState::List => (3.0 * MENU_ACTION_HEIGHT, 3.0),
+        MenuState::Confirming(action) => (
+            menu_text_height(action.prompt(), SECONDARY)
+                + menu_text_height(action.detail(), SECONDARY)
+                + MENU_FOOTER_HEIGHT,
+            4.0,
+        ),
+        MenuState::Pending(action) => (
+            menu_text_height(action.pending_line(), SECONDARY)
+                + menu_text_height("Closing this menu does not cancel the request.", SECONDARY)
+                + MENU_ACTION_HEIGHT,
+            4.0,
+        ),
+        MenuState::Result { action, outcome } => (
+            menu_text_height(&outcome.summary(*action), SECONDARY) + MENU_ACTION_HEIGHT,
+            3.0,
+        ),
+    };
+    let content = 2.0 * MENU_CONTENT_PAD + header + gaps * MENU_GAP + body;
+    let height = (MENU_BOTTOM_INSET + content + MENU_HEIGHT_SLACK)
+        .max(MENU_MIN_HEIGHT)
+        .ceil();
+    (MENU_WIDTH, height)
+}
+
+/// A body sentence in the popover. The explicit width and wrap-anywhere policy are shared by
+/// confirmation, pending and result copy so an unbroken sanitized error still wraps inside.
+fn menu_message(content: impl Into<String>) -> El {
+    text(content)
+        .font(SECONDARY)
+        .w(MENU_MESSAGE_WIDTH)
+        .wrap_anywhere()
+}
+
 fn menu(state: &State, _: &mut Cx<State>) -> El {
     let mut content = col()
         .w_full()
-        .padding(14.0)
-        .gap(8.0)
+        .padding(MENU_CONTENT_PAD)
+        .gap(MENU_GAP)
         .radius(14.0)
         .fill(PAPER.alpha(0.97))
         .border(1.5, MOSS.alpha(0.55))
         .shadow(3.0, 12.0, INK.alpha(0.25))
         .child(text("Power").font(LABEL).color(INK));
-    if let Some(action) = state.confirmation {
-        content = content
-            .child(
-                text(format!("Confirm {action}? (mock only)"))
-                    .font(SECONDARY)
-                    .color(MUTED),
-            )
-            .child(
-                col()
-                    .gap(8.0)
-                    .child(button("Confirm (mock)").on_press(|s: &mut State| s.confirmation = None))
-                    .child(button("Cancel").on_press(|s: &mut State| s.confirmation = None)),
-            );
-    } else {
-        for action in ["Log out", "Restart", "Shut down"] {
+
+    match state.power.state() {
+        MenuState::List => {
+            for action in PowerAction::ALL {
+                content = content.child(button(action.label()).key(action_key(action)).on_press(
+                    move |s: &mut State| {
+                        if s.power.select(action) {
+                            s.sync_power_menu_size();
+                        }
+                    },
+                ));
+            }
+        }
+        MenuState::Confirming(action) => {
             content = content
-                .child(button(action).on_press(move |s: &mut State| s.confirmation = Some(action)));
+                .h_full()
+                .child(menu_message(action.prompt()).key("power-prompt").color(INK))
+                .child(
+                    menu_message(action.detail())
+                        .key("power-detail")
+                        .color(MUTED),
+                )
+                .child(el().grow(1.0))
+                .child(
+                    row()
+                        .w_full()
+                        .gap(MENU_GAP)
+                        .child(
+                            footer_button("Cancel", "power-cancel").on_press(|s: &mut State| {
+                                s.power.cancel();
+                                s.sync_power_menu_size();
+                            }),
+                        )
+                        .child(
+                            footer_button("Confirm", "power-confirm")
+                                .on_press(|s: &mut State| s.confirm_power()),
+                        ),
+                );
+        }
+        MenuState::Pending(action) => {
+            content = content
+                .h_full()
+                .child(
+                    menu_message(action.pending_line())
+                        .key("power-pending")
+                        .color(INK),
+                )
+                .child(
+                    menu_message("Closing this menu does not cancel the request.")
+                        .key("power-pending-note")
+                        .color(MUTED),
+                )
+                .child(el().grow(1.0))
+                .child(button("Hide").key("power-hide").on_press(|_: &mut State| {
+                    hide_power_menu();
+                }));
+        }
+        MenuState::Result { action, outcome } => {
+            content = content.h_full().child(
+                menu_message(outcome.summary(*action))
+                    .key(if outcome.is_accepted() {
+                        "power-accepted"
+                    } else {
+                        "power-error"
+                    })
+                    .color(INK),
+            );
+            content = content.child(el().grow(1.0));
+            content = content.child(if outcome.is_accepted() {
+                button("Close")
+                    .key("power-close")
+                    .on_press(|_: &mut State| hide_power_menu())
+            } else {
+                button("Back to actions")
+                    .key("power-back")
+                    .on_press(|s: &mut State| {
+                        s.power.cancel();
+                        s.sync_power_menu_size();
+                    })
+            });
         }
     }
-    col().w_full().h_full().px(8.0).pb(12.0).child(content)
+
+    col()
+        .w_full()
+        .h_full()
+        .px(MENU_SIDE_INSET)
+        .pb(MENU_BOTTOM_INSET)
+        .child(content)
+}
+
+fn action_key(action: PowerAction) -> &'static str {
+    match action {
+        PowerAction::LogOut => "power-action-logout",
+        PowerAction::Restart => "power-action-restart",
+        PowerAction::ShutDown => "power-action-shutdown",
+    }
 }
 
 fn button(label: &'static str) -> El {
@@ -372,18 +530,72 @@ fn button(label: &'static str) -> El {
         .radius(8.0)
         .fill(STONE.alpha(0.35))
         .hover(STONE.alpha(0.70))
+        .hit()
         .child(text(label).font(SECONDARY).color(INK))
 }
 
-fn menu_key(_: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
+/// Footer controls are placed after a growing spacer, deliberately outside
+/// every initial action row. A quick second click where an action row used to
+/// be cannot land on Confirm.
+fn footer_button(label: &'static str, key: &'static str) -> El {
+    row()
+        .key(key)
+        .grow(1.0)
+        .h(30.0)
+        .center()
+        .radius(8.0)
+        .fill(STONE.alpha(0.35))
+        .hover(STONE.alpha(0.70))
+        .hit()
+        .child(text(label).font(SECONDARY).color(INK))
+}
+
+fn menu_key(state: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
     if event.key == Key::Escape {
-        if let Some(menu) = menu_handle() {
-            MENU_OPEN.store(false, Ordering::Relaxed);
-            menu.hide();
-        }
+        // Only an unconfirmed selection is cleared. A pending request stays
+        // pending and is shown on the next open.
+        state.power.dismiss();
+        hide_power_menu();
         true
     } else {
         false
+    }
+}
+
+fn hide_power_menu() {
+    if let Some(menu) = menu_handle() {
+        MENU_OPEN.store(false, Ordering::Relaxed);
+        menu.hide();
+    }
+}
+
+/// The state half of the bar's power toggle, kept separate so the production
+/// transition is exercised without a native overlay.
+fn set_power_menu_open(state: &mut State, open: bool) -> bool {
+    if open {
+        state.power.on_open()
+    } else {
+        state.power.dismiss()
+    }
+}
+
+fn toggle_power_menu() {
+    let Some(menu) = menu_handle() else {
+        return;
+    };
+    if MENU_OPEN.fetch_xor(true, Ordering::Relaxed) {
+        menu.update(|state, _| {
+            set_power_menu_open(state, false);
+        });
+        menu.hide();
+    } else {
+        menu.update(|state, tx| {
+            set_power_menu_open(state, true);
+            state.drain_power(tx);
+            state.sync_power_menu_size();
+        });
+        menu.show();
+        menu.request_keys();
     }
 }
 
@@ -430,6 +642,29 @@ fn setup(state: &mut State, wake: rune::Waker) {
     }
 }
 
+/// Start the production power worker when the power overlay is created. The
+/// test build deliberately has no runner: tests install fake channels instead.
+fn menu_setup(state: &mut State, wake: rune::Waker) {
+    #[cfg(not(test))]
+    match power_os::start(wake) {
+        Ok((tx, rx)) => {
+            state.power_tx = Some(tx);
+            state.power_rx = Some(rx);
+        }
+        Err(error) => state.power_start_error = Some(error),
+    }
+    #[cfg(test)]
+    {
+        let _ = (state, wake);
+    }
+}
+
+/// The power overlay's on-demand poll. A completion also wakes the overlay;
+/// draining on open is what makes feedback visible after a hidden response.
+fn power_poll(state: &mut State, _app_clock: f64, tx: &mut Tx) -> bool {
+    state.drain_power(tx)
+}
+
 /// Apply IPC messages and, when its minute deadline has arrived, one fresh clock
 /// sample. Rune calls `poll` at the start of a frame; IPC workers and the clock
 /// wake it through Rune. Neither source short-circuits the other, so a frame that
@@ -458,6 +693,60 @@ fn poll(state: &mut State, app_clock: f64, tx: &mut Tx) -> bool {
 }
 
 impl State {
+    /// Re-size the native popover after a state change. Test runtimes have no overlay
+    /// handle; their viewport is built from `menu_size_for` instead.
+    fn sync_power_menu_size(&self) {
+        if let Some(menu) = menu_handle() {
+            menu.resize(menu_size_for(self.power.state()));
+        }
+    }
+
+    /// The explicit confirmation control's handler. `PowerMenu::confirm`
+    /// enters pending before this method can touch the channel, so a reentrant
+    /// click or reopen cannot dispatch twice.
+    fn confirm_power(&mut self) {
+        let Some(dispatch) = self.power.confirm() else {
+            return;
+        };
+        self.sync_power_menu_size();
+        self.dispatch_power(dispatch);
+    }
+
+    /// Hand one authorized dispatch to the worker. A missing or disconnected
+    /// worker becomes a visible failure without blocking or retrying.
+    fn dispatch_power(&mut self, dispatch: Dispatch) {
+        let unavailable = self.power_start_error.clone();
+        let result = match self.power_tx.as_ref() {
+            Some(tx) => tx
+                .send(dispatch)
+                .map_err(|_| PowerError::WorkerDisconnected),
+            None => Err(unavailable.unwrap_or(PowerError::WorkerDisconnected)),
+        };
+        if let Err(error) = result {
+            self.power.apply_result(PowerEvent {
+                attempt: dispatch.attempt,
+                outcome: PowerOutcome::Failed(error),
+            });
+            self.sync_power_menu_size();
+        }
+    }
+
+    /// Apply every queued completion in order. The attempt number in the
+    /// event makes a late result from an abandoned attempt harmless.
+    fn drain_power(&mut self, tx: &mut Tx) -> bool {
+        let mut changed = false;
+        if let Some(rx) = self.power_rx.as_ref() {
+            while let Ok(event) = rx.try_recv() {
+                changed |= self.power.apply_result(event);
+            }
+        }
+        if changed {
+            self.sync_power_menu_size();
+            tx.instant();
+        }
+        changed
+    }
+
     /// The next observation: a fixed one in headless tests, otherwise the
     /// system's current wall and local time.
     fn next_clock_sample(&mut self) -> clock::Sample {
@@ -534,10 +823,18 @@ fn main() {
                 .wayland_top_reserved(40),
             State::default(),
         );
+        let menu_display = match &single_target {
+            Some(id) => DisplayTarget::Id(id.clone()),
+            None => DisplayTarget::Primary,
+        };
         let menu_overlay = app.overlay(
-            OverlaySpec::new("snowbar-power", (246.0, 222.0), menu)
+            OverlaySpec::new("snowbar-power", menu_size_for(&MenuState::List), menu)
                 .options(OverlayOptions {
-                    input: OverlayInput::All,
+                    // Only the keyed controls carry `.hit()`, so the menu's
+                    // blank area and padding pass clicks through instead of
+                    // covering the bar's power toggle.
+                    input: OverlayInput::Regions,
+                    display: menu_display,
                     keys: KeyPolicy::OnDemand,
                     placement: Some(OverlayPlacement::Edge {
                         edge: ScreenEdge::Top,
@@ -547,6 +844,8 @@ fn main() {
                     }),
                     ..Default::default()
                 })
+                .setup(menu_setup)
+                .poll(power_poll)
                 .on_key(menu_key),
             State::default(),
         );
@@ -857,6 +1156,670 @@ mod tests {
         assert!(runtime.find("workspaces-unavailable").is_some());
         assert!(runtime.find("workspace-1").is_none());
         assert!(rx.try_recv().is_err());
+    }
+
+    fn fake_power_state() -> (State, mpsc::Receiver<Dispatch>, mpsc::Sender<PowerEvent>) {
+        let (dispatch_tx, dispatch_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let state = State {
+            power_tx: Some(dispatch_tx),
+            power_rx: Some(result_rx),
+            ..State::default()
+        };
+        (state, dispatch_rx, result_tx)
+    }
+
+    /// Production menu view and handlers with a fixed fake backend and no
+    /// setup path, so no image is decoded and no real action can run. The
+    /// viewport is the same state-dependent size the production overlay uses.
+    fn power_runtime(state: State) -> Runtime<State> {
+        power_runtime_at_scale(state, 1.0)
+    }
+
+    fn power_runtime_at_scale(state: State, scale: f32) -> Runtime<State> {
+        let size = menu_size_for(state.power.state());
+        let mut runtime = Runtime::new(
+            state,
+            menu,
+            size,
+            Env {
+                scale,
+                ..Env::default()
+            },
+        );
+        runtime.poll = Some(power_poll);
+        runtime.on_key = Some(menu_key);
+        runtime.frame(0.0);
+        runtime
+    }
+
+    fn click(runtime: &mut Runtime<State>, key: &str) -> (f32, f32) {
+        let (x, y) = runtime.find(key).unwrap_or_else(|| panic!("missing {key}"));
+        click_at(runtime, x, y);
+        (x, y)
+    }
+
+    fn click_at(runtime: &mut Runtime<State>, x: f32, y: f32) {
+        runtime.pointer_move(x, y);
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        runtime.frame(1.0 / 60.0);
+    }
+
+    fn rect(runtime: &Runtime<State>, key: &str) -> [f32; 4] {
+        runtime
+            .presented(key)
+            .unwrap_or_else(|| panic!("missing presented rect for {key}"))
+            .0
+    }
+
+    fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {
+        a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+    }
+
+    fn no_dispatch(rx: &mpsc::Receiver<Dispatch>) {
+        assert!(
+            rx.try_recv().is_err(),
+            "selection, dismissal or a reentrant click must not dispatch"
+        );
+    }
+
+    fn xyxy(rect: [f32; 4]) -> [f32; 4] {
+        [rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]]
+    }
+
+    fn contains(region: [f32; 4], x: f32, y: f32) -> bool {
+        x >= region[0] && x < region[2] && y >= region[1] && y < region[3]
+    }
+
+    fn assert_region(runtime: &Runtime<State>, key: &str) {
+        let expected = xyxy(rect(runtime, key));
+        assert!(
+            runtime.hit_regions().iter().any(|region| {
+                region
+                    .iter()
+                    .zip(expected)
+                    .all(|(actual, expected)| (*actual - expected).abs() <= 1.0)
+            }),
+            "missing native hit region for {key}; regions: {:?}",
+            runtime.hit_regions()
+        );
+    }
+
+    fn escape(runtime: &mut Runtime<State>) {
+        runtime.key(KeyEvent {
+            key: Key::Escape,
+            mods: Default::default(),
+        });
+        runtime.frame(1.0 / 60.0);
+    }
+
+    #[test]
+    fn power_selection_shows_confirmation_without_dispatching() {
+        for action in PowerAction::ALL {
+            let (state, dispatch_rx, _result_tx) = fake_power_state();
+            let mut runtime = power_runtime(state);
+            for key in [
+                "power-action-logout",
+                "power-action-restart",
+                "power-action-shutdown",
+            ] {
+                assert!(runtime.find(key).is_some(), "initial row {key}");
+            }
+            click(&mut runtime, action_key(action));
+            assert_eq!(runtime.state.power.state(), &MenuState::Confirming(action));
+            assert!(runtime.find("power-confirm").is_some());
+            assert!(runtime.find("power-cancel").is_some());
+            no_dispatch(&dispatch_rx);
+        }
+    }
+
+    #[test]
+    fn confirm_is_disjoint_from_all_action_rows_and_double_click_cannot_confirm() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for action in PowerAction::ALL {
+                let (state, dispatch_rx, _result_tx) = fake_power_state();
+                let mut runtime = power_runtime_at_scale(state, scale);
+                let rows = PowerAction::ALL.map(|row| rect(&runtime, action_key(row)));
+                let (x, y) = click(&mut runtime, action_key(action));
+                assert_eq!(
+                    runtime.state.power.state(),
+                    &MenuState::Confirming(action),
+                    "scale {scale}"
+                );
+
+                let confirm = rect(&runtime, "power-confirm");
+                let cancel = rect(&runtime, "power-cancel");
+                for row in rows {
+                    assert!(
+                        !overlaps(confirm, row),
+                        "scale {scale}: Confirm at {confirm:?} overlaps an initial action row at {row:?}"
+                    );
+                    assert!(
+                        !overlaps(cancel, row),
+                        "scale {scale}: Cancel at {cancel:?} overlaps an initial action row at {row:?}"
+                    );
+                }
+
+                // A quick second click at the old row location must hit neither
+                // footer control.
+                click_at(&mut runtime, x, y);
+                assert_eq!(
+                    runtime.state.power.state(),
+                    &MenuState::Confirming(action),
+                    "scale {scale}: same-coordinate double click must not confirm {action:?}"
+                );
+                no_dispatch(&dispatch_rx);
+            }
+        }
+    }
+
+    #[test]
+    fn regions_cover_only_menu_controls_and_leave_blank_area_passthrough() {
+        let (state, dispatch_rx, result_tx) = fake_power_state();
+        let mut runtime = power_runtime(state);
+        assert_eq!(
+            runtime.hit_regions().len(),
+            3,
+            "three list rows must be the only hit regions"
+        );
+        for action in PowerAction::ALL {
+            assert_region(&runtime, action_key(action));
+        }
+        assert!(
+            !runtime
+                .hit_regions()
+                .iter()
+                .any(|region| contains(*region, 2.0, 2.0)),
+            "menu background must not intercept the pointer"
+        );
+        // Every point outside the keyed controls—including the blank background,
+        // the card padding, and this approximation of the bar power toggle area—
+        // must remain pass-through.
+        assert!(
+            !runtime
+                .hit_regions()
+                .iter()
+                .any(|region| contains(*region, 210.0, 20.0)),
+            "menu must not intercept the bar power toggle area"
+        );
+
+        let (x, y) = click(&mut runtime, action_key(PowerAction::Restart));
+        assert_eq!(
+            runtime.hit_regions().len(),
+            2,
+            "only Cancel and Confirm may intercept in confirmation"
+        );
+        assert_region(&runtime, "power-cancel");
+        assert_region(&runtime, "power-confirm");
+        assert!(
+            !runtime
+                .hit_regions()
+                .iter()
+                .any(|region| contains(*region, x, y)),
+            "the old action row must not remain a native hit region"
+        );
+        assert!(
+            !runtime
+                .hit_regions()
+                .iter()
+                .any(|region| contains(*region, 2.0, 2.0))
+        );
+
+        click(&mut runtime, "power-confirm");
+        let dispatch = dispatch_rx.try_recv().expect("one dispatch");
+        assert_eq!(runtime.hit_regions().len(), 1);
+        assert_region(&runtime, "power-hide");
+
+        result_tx
+            .send(PowerEvent {
+                attempt: dispatch.attempt,
+                outcome: PowerOutcome::Accepted,
+            })
+            .unwrap();
+        runtime.frame(0.0);
+        assert_eq!(runtime.hit_regions().len(), 1);
+        assert_region(&runtime, "power-close");
+    }
+
+    #[test]
+    fn uncertain_result_is_visible_and_not_shown_as_accepted() {
+        let (state, dispatch_rx, result_tx) = fake_power_state();
+        let mut runtime = power_runtime(state);
+        click(&mut runtime, action_key(PowerAction::LogOut));
+        click(&mut runtime, "power-confirm");
+        let dispatch = dispatch_rx.try_recv().expect("one dispatch");
+        result_tx
+            .send(PowerEvent {
+                attempt: dispatch.attempt,
+                outcome: PowerOutcome::Uncertain(PowerError::Timeout),
+            })
+            .unwrap();
+        runtime.frame(0.0);
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::LogOut,
+                outcome: PowerOutcome::Uncertain(PowerError::Timeout)
+            }
+        ));
+        assert!(runtime.find("power-error").is_some());
+        assert!(runtime.find("power-accepted").is_none());
+        no_dispatch(&dispatch_rx);
+    }
+
+    #[test]
+    fn explicit_confirm_dispatches_once_and_pending_survives_close() {
+        let (state, dispatch_rx, result_tx) = fake_power_state();
+        let mut runtime = power_runtime(state);
+        click(&mut runtime, action_key(PowerAction::Restart));
+        let confirm = click(&mut runtime, "power-confirm");
+
+        let dispatch = dispatch_rx.try_recv().expect("one authorized dispatch");
+        assert_eq!(dispatch.action, PowerAction::Restart);
+        assert_eq!(
+            dispatch.effect,
+            snowbar::power::Effect::Logind(snowbar::power::LogindMethod::Reboot)
+        );
+        assert_eq!(
+            runtime.state.power.state(),
+            &MenuState::Pending(PowerAction::Restart)
+        );
+
+        // Reentrant click at the old confirm location while pending.
+        click_at(&mut runtime, confirm.0, confirm.1);
+        no_dispatch(&dispatch_rx);
+
+        // Escape and reopen may hide the menu, but cannot cancel or rearm it.
+        escape(&mut runtime);
+        assert_eq!(
+            runtime.state.power.state(),
+            &MenuState::Pending(PowerAction::Restart)
+        );
+        no_dispatch(&dispatch_rx);
+        runtime.state.power.on_open();
+        runtime.frame(1.0 / 60.0);
+        assert_eq!(
+            runtime.state.power.state(),
+            &MenuState::Pending(PowerAction::Restart)
+        );
+        no_dispatch(&dispatch_rx);
+
+        result_tx
+            .send(PowerEvent {
+                attempt: dispatch.attempt,
+                outcome: PowerOutcome::Accepted,
+            })
+            .unwrap();
+        runtime.frame(0.0);
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::Restart,
+                outcome: PowerOutcome::Accepted
+            }
+        ));
+        assert!(runtime.find("power-accepted").is_some());
+
+        // A duplicate completion and another reopen do not dispatch again.
+        result_tx
+            .send(PowerEvent {
+                attempt: dispatch.attempt,
+                outcome: PowerOutcome::Accepted,
+            })
+            .unwrap();
+        runtime.frame(0.0);
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::Restart,
+                outcome: PowerOutcome::Accepted
+            }
+        ));
+        no_dispatch(&dispatch_rx);
+
+        // The stable accepted result has a Close control, not another action.
+        assert!(runtime.find("power-close").is_some());
+        click(&mut runtime, "power-close");
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::Restart,
+                outcome: PowerOutcome::Accepted
+            }
+        ));
+        runtime.state.power.on_open();
+        runtime.frame(1.0 / 60.0);
+        assert!(runtime.find("power-accepted").is_some());
+        no_dispatch(&dispatch_rx);
+    }
+
+    #[test]
+    fn failure_is_visible_persists_and_retry_needs_a_fresh_confirmation() {
+        let (state, dispatch_rx, result_tx) = fake_power_state();
+        let mut runtime = power_runtime(state);
+        click(&mut runtime, action_key(PowerAction::LogOut));
+        click(&mut runtime, "power-confirm");
+        let first = dispatch_rx.try_recv().expect("first dispatch");
+
+        result_tx
+            .send(PowerEvent {
+                attempt: first.attempt,
+                outcome: PowerOutcome::Failed(PowerError::PermissionDenied),
+            })
+            .unwrap();
+        // The completion arrives while the menu is hidden; the next open
+        // drains it and shows the operation-specific failure.
+        runtime.state.power.on_open();
+        runtime.frame(0.0);
+        assert!(runtime.find("power-error").is_some());
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::LogOut,
+                outcome: PowerOutcome::Failed(PowerError::PermissionDenied)
+            }
+        ));
+
+        // No automatic retries, and the failure survives hide/reopen.
+        for _ in 0..3 {
+            runtime.frame(1.0);
+        }
+        no_dispatch(&dispatch_rx);
+        escape(&mut runtime);
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result { .. }
+        ));
+        runtime.state.power.on_open();
+        runtime.frame(1.0 / 60.0);
+        assert!(runtime.find("power-error").is_some());
+        no_dispatch(&dispatch_rx);
+
+        // Back, select and confirm are all explicit; the retry has a new attempt.
+        click(&mut runtime, "power-back");
+        assert!(runtime.state.power.is_list());
+        click(&mut runtime, action_key(PowerAction::LogOut));
+        assert_eq!(
+            runtime.state.power.state(),
+            &MenuState::Confirming(PowerAction::LogOut)
+        );
+        click(&mut runtime, "power-confirm");
+        let second = dispatch_rx.try_recv().expect("explicit retry dispatch");
+        assert!(second.attempt > first.attempt);
+
+        // A stale completion from the first attempt cannot finish the retry.
+        result_tx
+            .send(PowerEvent {
+                attempt: first.attempt,
+                outcome: PowerOutcome::Accepted,
+            })
+            .unwrap();
+        runtime.frame(0.0);
+        assert_eq!(
+            runtime.state.power.state(),
+            &MenuState::Pending(PowerAction::LogOut)
+        );
+
+        result_tx
+            .send(PowerEvent {
+                attempt: second.attempt,
+                outcome: PowerOutcome::Accepted,
+            })
+            .unwrap();
+        runtime.frame(0.0);
+        assert!(runtime.find("power-accepted").is_some());
+    }
+
+    #[test]
+    fn cancel_escape_and_toggle_clear_only_unconfirmed_actions() {
+        for action in PowerAction::ALL {
+            let (state, dispatch_rx, _result_tx) = fake_power_state();
+            let mut runtime = power_runtime(state);
+
+            click(&mut runtime, action_key(action));
+            click(&mut runtime, "power-cancel");
+            assert!(runtime.state.power.is_list());
+            no_dispatch(&dispatch_rx);
+
+            click(&mut runtime, action_key(action));
+            escape(&mut runtime);
+            assert!(runtime.state.power.is_list());
+            no_dispatch(&dispatch_rx);
+
+            // The bar's toggle state path is exercised without a native
+            // overlay; show/hide and the global MENU_OPEN flag remain manual.
+            click(&mut runtime, action_key(action));
+            runtime.update(|state, _| {
+                set_power_menu_open(state, false);
+            });
+            runtime.frame(1.0 / 60.0);
+            assert!(runtime.state.power.is_list());
+            no_dispatch(&dispatch_rx);
+
+            click(&mut runtime, action_key(action));
+            runtime.update(|state, _| {
+                set_power_menu_open(state, true);
+            });
+            runtime.frame(1.0 / 60.0);
+            assert!(runtime.state.power.is_list());
+            no_dispatch(&dispatch_rx);
+        }
+    }
+
+    #[test]
+    fn enter_does_not_select_or_confirm() {
+        let (state, dispatch_rx, _result_tx) = fake_power_state();
+        let mut runtime = power_runtime(state);
+        let enter = KeyEvent {
+            key: Key::Enter,
+            mods: Default::default(),
+        };
+        runtime.key(enter);
+        runtime.frame(1.0 / 60.0);
+        assert!(runtime.state.power.is_list());
+        no_dispatch(&dispatch_rx);
+
+        click(&mut runtime, action_key(PowerAction::ShutDown));
+        runtime.key(KeyEvent {
+            key: Key::Enter,
+            mods: Default::default(),
+        });
+        runtime.frame(1.0 / 60.0);
+        assert_eq!(
+            runtime.state.power.state(),
+            &MenuState::Confirming(PowerAction::ShutDown)
+        );
+        no_dispatch(&dispatch_rx);
+    }
+
+    #[test]
+    fn missing_or_disconnected_worker_is_a_visible_failure() {
+        let mut state = State {
+            power_start_error: Some(PowerError::MissingBackend("niri socket")),
+            ..State::default()
+        };
+        let mut runtime = power_runtime(std::mem::take(&mut state));
+        click(&mut runtime, action_key(PowerAction::Restart));
+        click(&mut runtime, "power-confirm");
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::Restart,
+                outcome: PowerOutcome::Failed(PowerError::MissingBackend("niri socket"))
+            }
+        ));
+        assert!(runtime.find("power-error").is_some());
+
+        let (dispatch_tx, dispatch_rx) = mpsc::channel();
+        drop(dispatch_rx);
+        let mut state = State {
+            power_tx: Some(dispatch_tx),
+            ..State::default()
+        };
+        let mut runtime = power_runtime(std::mem::take(&mut state));
+        click(&mut runtime, action_key(PowerAction::LogOut));
+        click(&mut runtime, "power-confirm");
+        assert!(matches!(
+            runtime.state.power.state(),
+            MenuState::Result {
+                action: PowerAction::LogOut,
+                outcome: PowerOutcome::Failed(PowerError::WorkerDisconnected)
+            }
+        ));
+        assert!(runtime.find("power-error").is_some());
+    }
+
+    #[test]
+    fn power_copy_wraps_inside_the_popover_for_confirm_pending_and_results() {
+        let long = PowerError::rejected("W".repeat(240));
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for action in PowerAction::ALL {
+                let (state, _dispatch_rx, _result_tx) = fake_power_state();
+                let mut runtime = power_runtime_at_scale(state, scale);
+                click(&mut runtime, action_key(action));
+
+                assert_menu_text_fits(&runtime, "power-prompt", action.prompt());
+                assert_menu_text_fits(&runtime, "power-detail", action.detail());
+                assert_text_above_footer(&runtime, "power-prompt", "power-confirm");
+                assert_text_above_footer(&runtime, "power-detail", "power-confirm");
+                assert_footer_inside_menu(&runtime, "power-cancel");
+                assert_footer_inside_menu(&runtime, "power-confirm");
+            }
+
+            for action in PowerAction::ALL {
+                let (state, dispatch_rx, _result_tx) = fake_power_state();
+                let mut runtime = power_runtime_at_scale(state, scale);
+                click(&mut runtime, action_key(action));
+                click(&mut runtime, "power-confirm");
+                assert!(dispatch_rx.try_recv().is_ok(), "confirm dispatches once");
+
+                assert_menu_text_fits(&runtime, "power-pending", action.pending_line());
+                assert_menu_text_fits(
+                    &runtime,
+                    "power-pending-note",
+                    "Closing this menu does not cancel the request.",
+                );
+                assert_text_above_footer(&runtime, "power-pending", "power-hide");
+                assert_text_above_footer(&runtime, "power-pending-note", "power-hide");
+                assert_footer_inside_menu(&runtime, "power-hide");
+            }
+
+            for action in PowerAction::ALL {
+                for outcome in [
+                    PowerOutcome::Accepted,
+                    PowerOutcome::Failed(long.clone()),
+                    PowerOutcome::Uncertain(long.clone()),
+                ] {
+                    let (mut state, _dispatch_rx, _result_tx) = fake_power_state();
+                    assert!(state.power.select(action));
+                    let dispatch = state.power.confirm().expect("synthetic dispatch");
+                    assert!(state.power.apply_result(PowerEvent {
+                        attempt: dispatch.attempt,
+                        outcome: outcome.clone(),
+                    }));
+                    let size = menu_size_for(state.power.state());
+                    let runtime = power_runtime_at_scale(state, scale);
+                    assert_eq!(size, menu_size_for(runtime.state.power.state()));
+
+                    let summary = outcome.summary(action);
+                    let result_key = if outcome.is_accepted() {
+                        "power-accepted"
+                    } else {
+                        "power-error"
+                    };
+                    assert_menu_text_fits(&runtime, result_key, &summary);
+                    let footer = if outcome.is_accepted() {
+                        "power-close"
+                    } else {
+                        "power-back"
+                    };
+                    assert_text_above_footer(&runtime, result_key, footer);
+                    assert_footer_inside_menu(&runtime, footer);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_error_copy_grows_the_popover_instead_of_clipping() {
+        let long = PowerError::rejected("W".repeat(240));
+        let result = MenuState::Result {
+            action: PowerAction::ShutDown,
+            outcome: PowerOutcome::Uncertain(long),
+        };
+        let size = menu_size_for(&result);
+        assert!(
+            size.1 > MENU_MIN_HEIGHT,
+            "a worst-case result must grow the surface: {size:?}"
+        );
+        assert_eq!(size.0, MENU_WIDTH);
+    }
+
+    fn assert_menu_text_fits(runtime: &Runtime<State>, key: &str, expected: &str) {
+        let elements = runtime.elements();
+        let element = elements
+            .iter()
+            .find(|element| element.key.as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("missing rendered text {key}"));
+        assert_eq!(
+            element.text.as_deref(),
+            Some(expected),
+            "{key} must draw the whole sentence"
+        );
+        let [x, y, w, h] = element.rect;
+        assert!(w > 0.0 && h > 0.0, "{key} has no text box: {element:?}");
+        for (actual, wanted) in element.visible.iter().zip([x, y, w, h]) {
+            assert!(
+                (*actual - wanted).abs() <= 0.5,
+                "{key} is clipped: rect {:?}, visible {:?}",
+                element.rect,
+                element.visible
+            );
+        }
+        assert!(
+            x >= 0.0 && x + w <= MENU_WIDTH - MENU_SIDE_INSET + 0.5,
+            "{key} leaves the popover horizontally: {element:?}"
+        );
+        let (line_width, line_height) = rune::text::measure_with(
+            expected,
+            &[],
+            SECONDARY,
+            Some(w),
+            rune::text::RichLayoutOptions::new().wrap_anywhere(),
+        );
+        assert!(
+            line_width <= w + 0.75,
+            "{key} has a line wider than its box ({line_width} > {w})"
+        );
+        assert!(
+            line_height <= h + 0.75,
+            "{key} needs more lines than its box ({line_height} > {h})"
+        );
+    }
+
+    fn assert_text_above_footer(runtime: &Runtime<State>, text: &str, footer: &str) {
+        let text = rect(runtime, text);
+        let footer = rect(runtime, footer);
+        assert!(
+            text[1] + text[3] <= footer[1] + 0.5,
+            "{text:?} reaches into footer {footer:?}"
+        );
+    }
+
+    fn assert_footer_inside_menu(runtime: &Runtime<State>, key: &str) {
+        let [x, y, w, h] = rect(runtime, key);
+        assert!(
+            x >= 0.0 && y >= 0.0 && x + w <= MENU_WIDTH + 0.5,
+            "{key} leaves the popover: {:?}",
+            [x, y, w, h]
+        );
+        let menu_height = menu_size_for(runtime.state.power.state()).1;
+        assert!(
+            y + h <= menu_height + 0.5,
+            "{key} leaves the popover vertically: {:?} in {menu_height}",
+            [x, y, w, h]
+        );
     }
 
     #[test]

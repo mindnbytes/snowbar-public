@@ -3,4 +3,5 @@
 
 pub mod clock;
 pub mod niri;
+pub mod power;
 pub mod workspaces;
