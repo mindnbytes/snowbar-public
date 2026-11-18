@@ -1,6 +1,6 @@
 # Niri Rune Bar — Project Brief
 
-**Status:** Proposal / implementation guide; initial assessment complete, workspace slice implemented · **Updated:** 2026-11-18
+**Status:** Proposal / implementation guide; initial assessment complete, workspace and clock slices implemented · **Updated:** 2026-11-18
 
 ## Current status (2026-11-18)
 
@@ -11,8 +11,9 @@ describes how to verify a checkout. `docs/README.md` indexes the current notes.
 
 The feasibility gate is complete: a Rune layer-shell surface reserves top space
 and receives pointer input and on-demand keyboard focus in niri. Workspaces are
-implemented and reviewed for a single output; the clock and power menu remain
-mocked. `docs/workspace-policy.md` defines what has and has not been verified.
+implemented and reviewed for a single output, and the clock shows local time and
+updates on minute boundaries. The power menu remains mocked.
+`docs/workspace-policy.md` defines what has and has not been verified.
 
 ## Goal
 
@@ -41,9 +42,9 @@ No other widgets in v1. Specifically: no tray, notifications, network/audio cont
   improving semantic colors, layout and accessibility; see
   `docs/rune-visual-notes.md` for the concise findings and limitations.
 - **Approved bar mockup:** the current static bar is the visual baseline for
-  the functional implementation. Its workspace selection, clock and power
-  actions are mock-only; preserve the approved appearance while connecting
-  real behavior in the subsequent slices.
+  the functional implementation. Its power actions are still mock-only;
+  workspace selection and the clock are connected to real behavior. Preserve
+  the approved appearance while connecting the power slice.
 - Elegant macOS-inspired appearance, **not necessarily a literal macOS clone**: carefully tuned typography, subtle translucency *if technically feasible*, spacing, rounded popover, restrained animations, polished hover/active states.
 - Calm and unobtrusive; keep niri in charge of window management and workspace animations.
 - Top-edge bar with appropriate Wayland layer-shell anchoring and reserved space (avoid overlapping tiled windows).
@@ -76,6 +77,32 @@ user clicks ───────────────> UI commands ─┘   
 - Handle missing niri socket, reconnects, failed power commands, and loss of Wayland connection without panicking or leaving stale UI indefinitely.
 
 Do **not** invent a generic plugin registry, event bus, IPC daemon, elaborate configuration schema, or reusable design system for three widgets. Extract abstractions only when actual duplication warrants them.
+
+### Clock timing
+
+The clock reads the system wall clock and its local time once, when a
+minute-boundary wake is due, and displays `HH:MM` (24-hour, zero-padded) from
+that sample. The wake uses Rune's `Tx::wake_after` on the overlay's poll: no
+worker thread, timer service or shell command, and frames caused by pointer or
+IPC activity do no clock read. The next deadline is computed from each fresh
+sample, so a late wake, forward or backward step, resume, or time-zone change is
+corrected by the next absolute sample instead of replaying elapsed minutes. The
+wait comes from the sample's own local second and fraction, so a POSIX zone with
+a seconds offset still changes on its local minute boundaries. A sample whose
+`HH:MM` is unchanged does not re-run the view. The clock never depends on niri
+IPC; it displays from the first frame.
+
+The trade-off: changes the timer is not event-driven for (NTP correction,
+resume, `/etc/localtime` retargeting) can be stale for up to about one minute of
+awake time, until the next boundary wake. Each sample calls `tzset()` before
+`localtime_r`; glibc then re-reads `/etc/localtime` with `TZ` unset, as on
+NixOS. If `TZ` names a file that is retargeted in place, glibc may keep its
+cached rules until restart. The glibc path was checked against its
+implementation; live time-zone changes and suspend/resume were not tested.
+
+On 2026-11-18 the user reviewed the temporary clock bar in the single-output
+niri VM and confirmed that it looked right and the time advanced. The preview
+was stopped after review.
 
 ## Reuse-first investigation — before implementation
 

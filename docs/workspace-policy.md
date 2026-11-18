@@ -5,8 +5,8 @@ a simple v1 for their own single-monitor setup rather than expanding the Rune
 fork for output tracking now.
 Output changes and multiple monitors are not supported; stop and restart the
 bar after changing the display setup. This operational restriction does not
-itself enforce safety when a change happens. The clock and power menu remain
-mocked; no power action is ever executed by this slice.
+itself enforce safety when a change happens. The power menu remains mocked; no
+power action is ever executed by this slice.
 
 ## Implemented behaviour
 
