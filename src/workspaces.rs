@@ -482,6 +482,47 @@ mod tests {
     }
 
     #[test]
+    fn repeated_activation_without_a_change_keeps_state_equal() {
+        let mut state = WorkspaceState::default();
+        ready(
+            &mut state,
+            vec![
+                workspace(1, 1, None, Some("Virtual-1"), true),
+                workspace(2, 2, None, Some("Virtual-1"), false),
+            ],
+        );
+        state.apply(IpcMessage::Event {
+            generation: state.generation(),
+            event: Event::WorkspaceActivated {
+                id: 2,
+                focused: true,
+            },
+        });
+        let before = state.clone();
+        // niri can repeat the current activation; `poll` only asks for a repaint
+        // when the reduced state actually differs.
+        state.apply(IpcMessage::Event {
+            generation: state.generation(),
+            event: Event::WorkspaceActivated {
+                id: 2,
+                focused: true,
+            },
+        });
+        assert_eq!(state, before);
+
+        state.apply(IpcMessage::Event {
+            generation: state.generation(),
+            event: Event::WorkspaceActivated {
+                id: 1,
+                focused: true,
+            },
+        });
+        assert_ne!(state, before);
+        assert!(state.by_id(1).unwrap().is_active);
+        assert!(!state.by_id(2).unwrap().is_active);
+    }
+
+    #[test]
     fn focus_intent_uses_current_stable_id_and_generation() {
         let mut state = WorkspaceState::default();
         assert!(state.focus_action(42).is_none());

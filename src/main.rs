@@ -1,8 +1,8 @@
 use rune::tok::motion;
 use rune::{
-    Align, App, AppSpec, Color, Cx, DisplayTarget, El, Image, ImageCache, Key, KeyEvent, KeyPolicy,
-    NativeDisplayId, OverlayInput, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge,
-    TextStyle, Tx, WindowSpec, col, el, row, text,
+    Align, Anim, App, AppSpec, Color, Cx, DisplayTarget, El, Image, ImageCache, Key, KeyEvent,
+    KeyPolicy, NativeDisplayId, OverlayInput, OverlayOptions, OverlayPlacement, OverlaySpec,
+    ScreenEdge, TextStyle, Tx, WindowSpec, col, el, row, text,
 };
 use snowbar::niri::NiriClient;
 use snowbar::workspaces::{DisplaySnapshot, WorkspaceItem, WorkspaceState};
@@ -57,7 +57,6 @@ const WORKSPACE_AREA_WIDTH: f32 = 300.0;
 #[derive(Default)]
 struct State {
     confirmation: Option<&'static str>,
-    hovered_workspace: Option<u64>,
     hovered_clock: bool,
     hovered_power: bool,
     cache: Option<ImageCache>,
@@ -105,7 +104,6 @@ fn workspace_numeral(state: &State, index: u8) -> El {
 fn workspace_button(state: &State, item: WorkspaceItem) -> El {
     let id = item.id;
     let active = item.is_active;
-    let hovered = state.hovered_workspace == Some(id);
     let glass = match &state.glass {
         Some(image) => el()
             .size(38.0, 38.0)
@@ -113,7 +111,13 @@ fn workspace_button(state: &State, item: WorkspaceItem) -> El {
             .absolute(0.0, 0.0),
         None => el().size(38.0, 38.0).absolute(0.0, 0.0),
     };
-    el().key(format!("workspace-{id}"))
+    // Hover is paint-only here: state would commit the whole view as the
+    // pointer crosses each capsule. Group-opacity layers draw the same warm
+    // shadow and wash the state-driven version drew, over the same 38×38
+    // target, so the edges still light. `INSTANT` keeps the landed look of the
+    // approved highlight instead of adding a fade.
+    let mut button = el()
+        .key(format!("workspace-{id}"))
         .size(38.0, 38.0)
         .center()
         .radius(10.0)
@@ -121,7 +125,7 @@ fn workspace_button(state: &State, item: WorkspaceItem) -> El {
         .shadow(
             0.0,
             5.0,
-            if active || hovered {
+            if active {
                 WARM.alpha(0.50)
             } else {
                 Color::TRANSPARENT
@@ -129,6 +133,21 @@ fn workspace_button(state: &State, item: WorkspaceItem) -> El {
         )
         .press_scale(0.95)
         .motion(motion::SNAPPY)
+        .hover_group()
+        .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
+    if !active {
+        // A selected capsule already casts the warm shadow; a second layer
+        // would double it, so this is only added while it would change paint.
+        button = button.child(
+            el().size(38.0, 38.0)
+                .radius(10.0)
+                .fill(Color::TRANSPARENT)
+                .shadow(0.0, 5.0, WARM.alpha(0.50))
+                .group_opacity(0.0, 1.0)
+                .absolute(0.0, 0.0),
+        );
+    }
+    button
         .child(
             el().size(34.0, 34.0)
                 .radius(10.0)
@@ -143,21 +162,11 @@ fn workspace_button(state: &State, item: WorkspaceItem) -> El {
         .child(
             el().size(30.0, 30.0)
                 .radius(9.0)
-                .fill(if hovered {
-                    WARM.alpha(0.18)
-                } else {
-                    Color::TRANSPARENT
-                })
+                .fill(WARM.alpha(0.18))
+                .group_opacity(0.0, 1.0)
                 .absolute(4.0, 4.0),
         )
         .child(workspace_numeral(state, item.index))
-        .on_hover_change(move |s: &mut State, inside, _| {
-            if inside {
-                s.hovered_workspace = Some(id);
-            } else if s.hovered_workspace == Some(id) {
-                s.hovered_workspace = None;
-            }
-        })
         .on_press(move |s: &mut State| {
             if let (Some(tx), Some(intent)) = (s.focus_tx.as_ref(), s.workspaces.focus_action(id)) {
                 let _ = tx.send(intent);
@@ -403,9 +412,12 @@ fn setup(state: &mut State, wake: rune::Waker) {
     .collect();
 
     if let Some(displays) = DISPLAYS.get() {
-        let client = NiriClient::start(displays.clone(), wake);
-        state.focus_tx = Some(client.focus_sender());
-        state.ipc = Some(client);
+        // A worker that cannot be spawned leaves the UI unavailable instead of
+        // panicking inside setup.
+        if let Some(client) = NiriClient::start(displays.clone(), wake) {
+            state.focus_tx = Some(client.focus_sender());
+            state.ipc = Some(client);
+        }
     }
 }
 
@@ -419,15 +431,37 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     if messages.is_empty() {
         return false;
     }
-    let before = state.workspaces.clone();
-    for message in messages {
-        state.workspaces.apply(message);
-    }
-    let changed = state.workspaces != before;
+    let changed = apply_ipc_messages(state, messages);
     if changed {
         tx.instant();
     }
     changed
+}
+
+/// What the workspace area actually draws. A snapshot can change names,
+/// urgency or active-window IDs, and those must update state without asking
+/// Rune to re-run the view: `poll` returns whether a frame needs one.
+fn workspace_render_key(state: &State) -> (bool, Vec<(u64, u8, bool)>) {
+    (
+        state.workspaces.is_available(),
+        state
+            .workspaces
+            .view()
+            .into_iter()
+            .map(|item| (item.id, item.index, item.is_active))
+            .collect(),
+    )
+}
+
+fn apply_ipc_messages(
+    state: &mut State,
+    messages: impl IntoIterator<Item = snowbar::workspaces::IpcMessage>,
+) -> bool {
+    let before = workspace_render_key(state);
+    for message in messages {
+        state.workspaces.apply(message);
+    }
+    workspace_render_key(state) != before
 }
 
 fn main() {
@@ -539,6 +573,105 @@ mod tests {
         let intent = rx.try_recv().expect("focus intent");
         assert_eq!(intent.workspace_id, 8);
         assert_eq!(intent.generation, 1);
+    }
+
+    #[test]
+    fn hovering_a_workspace_paints_without_rebuilding_the_view() {
+        let (tx, rx) = mpsc::channel();
+        let mut state = ready_state(&[(7, 1, true), (8, 2, false)]);
+        state.focus_tx = Some(tx);
+        let mut runtime = Runtime::new(state, bar, (900.0, 40.0), Env::default());
+        runtime.frame(0.0);
+        let rest = format!("{:?}", runtime.instances);
+        let commits = runtime.stats.commits;
+        let (x, y) = runtime.find("workspace-8").expect("workspace button");
+
+        runtime.pointer_move(x, y);
+        runtime.frame(1.0 / 60.0);
+
+        assert_eq!(
+            runtime.stats.commits, commits,
+            "hover is paint-only and must not re-run the view"
+        );
+        assert_ne!(
+            format!("{:?}", runtime.instances),
+            rest,
+            "hover must still paint the warm highlight"
+        );
+        assert!(rx.try_recv().is_err(), "hover alone must not focus");
+
+        // The whole 38×38 capsule is one hover target; only the 30×30 wash is
+        // inset. Moving inside that outer ring must not drop the highlight.
+        let hovered = format!("{:?}", runtime.instances);
+        let (capsule, _) = runtime.presented("workspace-8").expect("workspace button");
+        runtime.pointer_move(capsule[0] + 19.0, capsule[1] + 3.0);
+        runtime.frame(1.0 / 60.0);
+        assert_eq!(
+            format!("{:?}", runtime.instances),
+            hovered,
+            "the capsule edge stays lit"
+        );
+        assert_eq!(runtime.stats.commits, commits);
+    }
+
+    #[test]
+    fn only_rendered_workspace_changes_ask_for_a_frame() {
+        let mut state = ready_state(&[(7, 1, true), (8, 2, false)]);
+        let revision = |name: &str, urgent: bool, active_window_id: Option<u64>| Workspace {
+            id: 7,
+            idx: 1,
+            name: Some(name.to_owned()),
+            output: Some("Virtual-1".to_owned()),
+            is_urgent: urgent,
+            is_active: true,
+            is_focused: true,
+            active_window_id,
+        };
+        let same_render = IpcMessage::Event {
+            generation: state.workspaces.generation(),
+            event: niri_ipc::Event::WorkspacesChanged {
+                workspaces: vec![
+                    revision("renamed", true, Some(99)),
+                    Workspace {
+                        id: 8,
+                        idx: 2,
+                        name: None,
+                        output: Some("Virtual-1".to_owned()),
+                        is_urgent: false,
+                        is_active: false,
+                        is_focused: false,
+                        active_window_id: None,
+                    },
+                ],
+            },
+        };
+        assert!(
+            !apply_ipc_messages(&mut state, [same_render]),
+            "names, urgency and active windows are not drawn"
+        );
+        assert_eq!(
+            state.workspaces.by_id(7).unwrap().name.as_deref(),
+            Some("renamed")
+        );
+        assert!(state.workspaces.by_id(7).unwrap().is_urgent);
+
+        let generation = state.workspaces.generation();
+        assert!(apply_ipc_messages(
+            &mut state,
+            [IpcMessage::Event {
+                generation,
+                event: niri_ipc::Event::WorkspaceActivated {
+                    id: 8,
+                    focused: true,
+                },
+            }],
+        ));
+        assert!(state.workspaces.by_id(8).unwrap().is_active);
+
+        assert!(
+            apply_ipc_messages(&mut state, [IpcMessage::Session { generation: 2 }]),
+            "losing the snapshot clears the bar"
+        );
     }
 
     #[test]

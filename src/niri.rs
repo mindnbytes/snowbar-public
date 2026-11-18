@@ -5,7 +5,14 @@
 //! sockets. Both share a generation gate: after a disconnect is observed,
 //! intents that have not been authorized for dispatch are rejected. An
 //! already-authorized request is in flight and cannot reliably be recalled.
-//! The UI only ever sees ordered [`IpcMessage`]s.
+//! The UI only ever sees ordered [`IpcMessage`]s, and only events the bar
+//! renders are forwarded to it.
+//!
+//! If a worker thread cannot be spawned, [`NiriClient::start`] returns `None`
+//! and the UI keeps its unavailable state instead of panicking. niri-ipc
+//! 26.4.0's socket helper exposes no read/write timeout or shutdown hook, so a
+//! wedged compositor can still block a worker; replacing the helper would
+//! duplicate its framing and is deliberately left as a separate decision.
 
 use crate::workspaces::{
     DisplaySelection, DisplaySnapshot, FocusIntent, IpcMessage, select_display,
@@ -97,7 +104,17 @@ pub struct NiriClient {
 impl NiriClient {
     /// Start the workers. `wake` is Rune's repaint waker, called whenever a
     /// message is enqueued so the UI drains it on its own thread.
-    pub fn start(displays: Vec<DisplaySnapshot>, wake: rune::Waker) -> Self {
+    ///
+    /// Returns `None` when the OS cannot start a worker thread, leaving the UI
+    /// in its unavailable state. Any worker already started is told to stop and
+    /// its channel closes on return, so no detached thread keeps running a
+    /// half-started client.
+    pub fn start(displays: Vec<DisplaySnapshot>, wake: rune::Waker) -> Option<Self> {
+        // Unbounded on purpose. Filtering leaves only snapshot/activation events,
+        // and neither may be dropped: a bounded event channel would need
+        // blocking sends (stalling the compositor stream) or coalescing, while a
+        // bounded focus queue would drop clicks or block the UI thread. Revisit
+        // only with evidence of a real backlog.
         let (message_tx, messages) = mpsc::channel();
         let (focus_tx, focus_rx) = mpsc::channel();
         let gate = Arc::new(FocusGate::new());
@@ -105,7 +122,7 @@ impl NiriClient {
 
         let action_gate = Arc::clone(&gate);
         let action_shutdown = Arc::clone(&shutdown);
-        thread::Builder::new()
+        let spawned = thread::Builder::new()
             .name("snowbar-niri-actions".into())
             .spawn(move || {
                 while !action_shutdown.load(Ordering::Relaxed) {
@@ -122,23 +139,29 @@ impl NiriClient {
                         Err(RecvTimeoutError::Disconnected) => break,
                     }
                 }
-            })
-            .expect("spawn niri action worker");
+            });
+        if spawned.is_err() {
+            shutdown.store(true, Ordering::Relaxed);
+            return None;
+        }
 
         let event_gate = Arc::clone(&gate);
         let event_shutdown = Arc::clone(&shutdown);
-        thread::Builder::new()
+        let spawned = thread::Builder::new()
             .name("snowbar-niri-events".into())
             .spawn(move || {
                 run_sessions(displays, event_gate, event_shutdown, message_tx, wake);
-            })
-            .expect("spawn niri event worker");
+            });
+        if spawned.is_err() {
+            shutdown.store(true, Ordering::Relaxed);
+            return None;
+        }
 
-        Self {
+        Some(Self {
             messages,
             focus_tx,
             shutdown,
-        }
+        })
     }
 
     /// Drain all pending messages without blocking.
@@ -184,10 +207,25 @@ fn sleep_bounded(duration: Duration, shutdown: &AtomicBool) {
     }
 }
 
+/// Whether an event can change what the bar draws. niri streams every event over
+/// the same socket; window events feed no reducer state, and workspace urgency
+/// and active-window fields are tracked by the reducer but never rendered. They
+/// are dropped at this boundary so they cannot enqueue messages or wake the UI.
+/// A `WorkspacesChanged` snapshot still carries the full workspace list,
+/// including urgency and active-window values.
+fn affects_view(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::WorkspacesChanged { .. } | Event::WorkspaceActivated { .. }
+    )
+}
+
 fn publish(ui: &Sender<IpcMessage>, wake: &rune::Waker, message: IpcMessage) -> bool {
-    let alive = ui.send(message).is_ok();
+    if ui.send(message).is_err() {
+        return false;
+    }
     wake();
-    alive
+    true
 }
 
 /// Connect, validate the single-output mapping, stream events until loss.
@@ -236,6 +274,9 @@ fn session_once(
         let Ok(event) = read_event() else {
             return ready;
         };
+        if !affects_view(&event) {
+            continue;
+        }
         if let Event::WorkspacesChanged { workspaces } = &event {
             if workspaces.iter().any(|workspace| {
                 workspace
@@ -321,6 +362,47 @@ mod tests {
                 reference: WorkspaceReferenceArg::Id(42),
             },
         }
+    }
+
+    #[test]
+    fn only_rendered_event_kinds_are_forwarded() {
+        assert!(affects_view(&Event::WorkspacesChanged {
+            workspaces: Vec::new()
+        }));
+        assert!(affects_view(&Event::WorkspaceActivated {
+            id: 1,
+            focused: true
+        }));
+        assert!(!affects_view(&Event::WorkspaceUrgencyChanged {
+            id: 1,
+            urgent: true
+        }));
+        assert!(!affects_view(&Event::WorkspaceActiveWindowChanged {
+            workspace_id: 1,
+            active_window_id: Some(2)
+        }));
+        assert!(!affects_view(&Event::WindowClosed { id: 1 }));
+    }
+
+    #[test]
+    fn publisher_wakes_only_after_a_successful_send() {
+        use std::sync::atomic::AtomicUsize;
+
+        let (tx, rx) = mpsc::channel();
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let woken = Arc::clone(&wakes);
+        let wake: rune::Waker = Arc::new(move || {
+            woken.fetch_add(1, Ordering::Relaxed);
+        });
+        assert!(publish(&tx, &wake, IpcMessage::Session { generation: 1 }));
+        assert_eq!(wakes.load(Ordering::Relaxed), 1, "a queued message wakes");
+        drop(rx);
+        assert!(!publish(&tx, &wake, IpcMessage::Session { generation: 2 }));
+        assert_eq!(
+            wakes.load(Ordering::Relaxed),
+            1,
+            "a detached UI is not woken"
+        );
     }
 
     #[test]
