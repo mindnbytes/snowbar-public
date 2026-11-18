@@ -7,9 +7,10 @@ fork revision; Rune's workspace patches are not inherited by applications.
 ## Fork checkout and pin
 
 Work from the sibling `rune-integration` checkout (the `rune-fork` project
-reference in `opencode.json`). Do not assume a branch name or copy a revision
-from these notes: `Cargo.toml` is the source of truth, and it should yield
-exactly one revision across the `rune` dependency and every patch.
+reference if configured in your local `opencode.json`). Do not assume a
+branch name or copy a revision from these notes: `Cargo.toml` is the source
+of truth, and it should yield exactly one revision across the `rune`
+dependency and every patch.
 
 ```sh
 pc=$(grep -o 'rev = "[0-9a-f]\{40\}"' Cargo.toml | cut -d'"' -f2 | sort -u)

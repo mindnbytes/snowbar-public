@@ -34,5 +34,6 @@ presented as current state.
 ## Fork checkout
 
 The Rune fork checkout is expected as a sibling `rune-integration` directory.
-`opencode.json` exposes it as the `rune-fork` project reference for local
-inspection. Do not put machine-specific absolute paths into the public fork.
+An optional, Git-ignored `opencode.json` can expose it as the `rune-fork`
+project reference for local inspection. Keep machine-specific paths in that
+local file, not in commits.
