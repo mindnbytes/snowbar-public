@@ -12,16 +12,20 @@ On Linux, in the project's development shell, run:
 nix develop --command sh scripts/check-rune-integration.sh
 ```
 
-This checks and tests all Snowbar targets using the committed lockfile. The
-script defaults to two build jobs; set `CARGO_BUILD_JOBS` to change that. These
-tests do not verify a live compositor or the whole Rune test suite. Rune's
-overlay unit tests are optional locally because their test binary exceeded the
-VM's available memory and caused heavy swapping, even with reduced debug info.
-Run them on a sufficiently provisioned machine if available, after the
-lightweight checks pass:
+This checks the Snowbar binary using the committed lockfile; it does **not**
+run tests or verify a live compositor. The script defaults to two build jobs;
+set `CARGO_BUILD_JOBS` to change that. Record the missing test coverage
+separately from the check result.
+
+Do not compile or run the full Rune test suite or heavy `--all-targets` test
+links on the local Mac or VM without explicit user approval. Rune's test binary
+exceeded the VM's available memory and caused heavy swapping even with reduced
+debug info. On a sufficiently provisioned machine, optional broader checks
+include Snowbar's all-target tests and Rune's overlay tests:
 
 ```sh
-CARGO_BUILD_JOBS=2 cargo test -p rune --lib overlay::
+nix develop --command env CARGO_BUILD_JOBS=2 cargo test --locked --all-targets
+nix develop --command env CARGO_BUILD_JOBS=2 cargo test -p rune --lib overlay::
 ```
 
 Compiling Rune's test binary is very resource-intensive even when tests are
