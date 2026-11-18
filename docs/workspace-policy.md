@@ -66,7 +66,14 @@ On 2026-11-17, the user reviewed the final Snowbar build pinned to Rune
 confirmed that its appearance, horizontal scrolling and workspace clicks
 looked good. Niri reported the layer on `Virtual-1`; the temporary bar was
 stopped after review. This does not establish hotplug or physical mouse-wheel
-behaviour, or restart/reconnect recovery.
+behaviour, or recovery from a real niri restart.
+
+On 2026-11-18, the user tested the cleanup candidate in the VM through a
+temporary IPC proxy. After the proxy closed and blocked connections, the bar
+showed `niri unavailable` without clickable workspaces. When connections were
+allowed again, workspaces returned and clicking to focus worked. Niri itself
+remained running: this verifies recovery from an interrupted IPC connection,
+not a compositor restart, a hung socket, or every in-flight action race.
 
 The following remain **unverified** and require the niri VM checklist in
 `docs/rune-integration.md`:
