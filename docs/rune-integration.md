@@ -85,10 +85,23 @@ the installed bar. Record the fork commit and results before updating the pin.
 - [ ] The bar spans the expected output, renders correctly, and tiled windows
       start below its reserved area.
 - [ ] Bar clicks work; the power menu opens at the correct position.
-- [ ] Menu keyboard focus works and Escape dismisses it; click dismissal works.
-- [ ] Fullscreen hides the bar and leaving fullscreen restores it.
+- [ ] Menu keyboard focus works and Escape dismisses it; the bar's power toggle
+      also dismisses it.
+- [ ] Power rows open action-specific confirmation without dispatching; Cancel
+      and Escape clear an unconfirmed selection.
+- [ ] The menu's blank area does not cover the bar's power toggle; only its
+      buttons intercept the pointer, including at narrow/scaled output.
+- [ ] A same-coordinate double click on each row, especially Restart, does not
+      confirm.
+- [ ] Fullscreen hides the bar and leaving fullscreen restores it. An already
+      open power menu remaining above fullscreen is a known, deferred issue.
+      If revisiting the Rune prototype, run the
+      [fullscreen and placement checks](power-policy.md#deferred-fullscreen-layering)
+      before updating the pin.
 - [ ] Check scaling and output changes when practical; record any not tested.
 - [ ] Stop the temporary candidate after testing; do not activate a power action.
+      If the user chooses to test one, use a disposable session and see the
+      user-only checklist in `power-policy.md`.
 
 Do not infer a pass for untested items. Update `Cargo.toml` and `Cargo.lock`
 only after reviewing the candidate's results and remaining risks.

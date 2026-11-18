@@ -1,6 +1,6 @@
 # Niri Rune Bar — Project Brief
 
-**Status:** Proposal / implementation guide; initial assessment complete, workspace and clock slices implemented · **Updated:** 2026-11-18
+**Status:** Implementation guide; workspace, clock and power menu slices implemented · **Updated:** 2026-11-18
 
 ## Current status (2026-11-18)
 
@@ -12,8 +12,16 @@ describes how to verify a checkout. `docs/README.md` indexes the current notes.
 The feasibility gate is complete: a Rune layer-shell surface reserves top space
 and receives pointer input and on-demand keyboard focus in niri. Workspaces are
 implemented and reviewed for a single output, and the clock shows local time and
-updates on minute boundaries. The power menu remains mocked.
-`docs/workspace-policy.md` defines what has and has not been verified.
+updates on minute boundaries. The three-action power menu now has typed effects,
+explicit confirmation and single-flight feedback; the user reported that it
+worked in the VM. Its confirmation, pending and result copy now share a bounded
+wrapped layout tested headlessly at 1×, 1.25×, 1.5× and 2×; the user approved
+the corrected confirmation layout in the VM. An open menu can
+remain above a fullscreen window even when the bar hides. The Rune prototype
+for that edge case is parked on a separate branch; Snowbar keeps the current
+pin. See [power menu policy](docs/power-policy.md) for verification and the
+deferred prototype, and [workspace policy](docs/workspace-policy.md) for
+workspace and output boundaries.
 
 ## Goal
 
@@ -41,10 +49,9 @@ No other widgets in v1. Specifically: no tray, notifications, network/audio cont
   the exploratory geometry comparison. Keep that artwork as the baseline while
   improving semantic colors, layout and accessibility; see
   `docs/rune-visual-notes.md` for the concise findings and limitations.
-- **Approved bar mockup:** the current static bar is the visual baseline for
-  the functional implementation. Its power actions are still mock-only;
-  workspace selection and the clock are connected to real behavior. Preserve
-  the approved appearance while connecting the power slice.
+- **Approved bar mockup:** the static studies remain the visual baseline for
+  the functional bar. The studies use mock data and actions; the main bar
+  connects all three widgets to real behavior.
 - Elegant macOS-inspired appearance, **not necessarily a literal macOS clone**: carefully tuned typography, subtle translucency *if technically feasible*, spacing, rounded popover, restrained animations, polished hover/active states.
 - Calm and unobtrusive; keep niri in charge of window management and workspace animations.
 - Top-edge bar with appropriate Wayland layer-shell anchoring and reserved space (avoid overlapping tiled windows).
