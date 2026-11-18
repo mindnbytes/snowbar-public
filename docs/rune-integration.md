@@ -4,6 +4,28 @@ Run these checks for every candidate Rune update before updating the application
 pin. The application and all five Cargo patches must point at the same tested
 fork revision; Rune's workspace patches are not inherited by applications.
 
+## Fork checkout and pin
+
+Work from the sibling `rune-integration` checkout (the `rune-fork` project
+reference in `opencode.json`). Do not assume a branch name or copy a revision
+from these notes: `Cargo.toml` is the source of truth, and it should yield
+exactly one revision across the `rune` dependency and every patch.
+
+```sh
+pc=$(grep -o 'rev = "[0-9a-f]\{40\}"' Cargo.toml | cut -d'"' -f2 | sort -u)
+printf '%s\n' "$pc"   # exactly one line; more means the manifest disagrees
+test "$(git -C ../rune-integration rev-parse HEAD)" = "$pc"
+git -C ../rune-integration status --short
+```
+
+HEAD must equal the manifest revision; a detached HEAD is fine. The status
+command reports local edits: they are acceptable for a source inspection if you
+name which files you are reading around, but HEAD alone then does not prove the
+files match the pin. Use a clean worktree at the pinned commit for reproducible
+comparisons, builds or behavior claims. If HEAD differs, inspect that difference
+rather than calling it the pin. Keep local absolute paths out of the public
+fork's docs, issues and commits.
+
 ## Automated checks
 
 On Linux, in the project's development shell, run:

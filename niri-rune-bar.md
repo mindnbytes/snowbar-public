@@ -1,6 +1,18 @@
 # Niri Rune Bar — Project Brief
 
-**Status:** Proposal / implementation guide · **Updated:** 2026-11-09
+**Status:** Proposal / implementation guide; initial assessment complete, workspace slice implemented · **Updated:** 2026-11-18
+
+## Current status (2026-11-18)
+
+The initial reuse/feasibility assessment is complete; `docs/reuse-decision.md`
+holds its evidence and history. It is a decision record, not the dependency pin:
+`Cargo.toml` names the tested Rune fork revision, and `docs/rune-integration.md`
+describes how to verify a checkout. `docs/README.md` indexes the current notes.
+
+The feasibility gate is complete: a Rune layer-shell surface reserves top space
+and receives pointer input and on-demand keyboard focus in niri. Workspaces are
+implemented and reviewed for a single output; the clock and power menu remain
+mocked. `docs/workspace-policy.md` defines what has and has not been verified.
 
 ## Goal
 
@@ -79,7 +91,11 @@ Inspect these references at pinned commits:
 | [niri IPC documentation](https://github.com/niri-wm/niri/blob/main/docs/wiki/IPC.md) and [niri-ipc source](https://github.com/niri-wm/niri) | Official events, workspace IDs, commands, compatibility expectations | **Preferred source of truth** for workspace backend. Evaluate using `niri-ipc` at a compatible version instead of cloning a bar's IPC implementation. |
 | [Rune](https://github.com/anomalyco/rune) | UI framework, headless rendering, Linux platform support | Pin a development revision and validate actual layer-shell support in a running niri VM. |
 
-### First agent task: short technical assessment
+### First agent task: short technical assessment (completed)
+
+Completed; see `docs/reuse-decision.md`. That note contains source-review
+evidence, incremental probe results and historical commit IDs. It is not a
+current-pin audit, and its early conclusions are retained as history.
 
 Before scaffolding an application, inspect code, licenses, dependency graphs, and maintenance status of Hokum and Ashell (and the relevant niri IPC library). Answer:
 
@@ -126,11 +142,13 @@ validation and reload behavior when that slice is actually planned.
   least one alternative palette and visual comparison. If fixed artwork limits
   what can be recolored, document that limitation rather than claiming full
   theming support.
-- The mock only supplies artwork for `0`, `1`, `2`, `3`, `4` and `9` and shows
-  four workspaces. A real clock needs every digit; niri may expose more than
-  four workspaces, multi-digit indices, or names. Complete the matching glyphs
-  and choose a readable fallback/display policy before connecting those paths;
-  never silently drop workspaces or assume four is a maximum.
+- The artwork now covers every digit `0`–`9`, and the nine-workspace study
+  (`examples/nine_workspace_bar.rs`) shows more than four. That does not
+  establish a four-workspace limit or a real clock: its layout, sizing and
+  minute updates are still mocked, and niri may expose more workspaces,
+  multi-digit indices, or names. Choose a readable fallback/display policy
+  before connecting those paths; never silently drop workspaces or assume four
+  is a maximum.
 - Keep configuration, view state and side effects separate enough that a later
   configuration layer can supply validated values without rewriting niri IPC,
   clock or power logic. Add only the small structure justified by the current
@@ -148,7 +166,8 @@ validation and reload behavior when that slice is actually planned.
 ## Working with OpenCode
 
 - Read this file and relevant upstream documentation before proposing major changes.
-- First complete the reuse/feasibility assessment, **then** write implementation code.
+  The initial reuse/feasibility assessment is complete (`docs/reuse-decision.md`);
+  use its evidence and stated limits rather than treating it as an open prerequisite.
 - Prefer the minimal working solution; explain trade-offs before adding crates/processes/abstractions.
 - Prefer delegating straightforward and easily testable pieces of work to subagent, use OpenAI GPT-6 Luna.
 - Pin Rune and other unstable dependencies. Keep `Cargo.lock` and `flake.lock` committed.
