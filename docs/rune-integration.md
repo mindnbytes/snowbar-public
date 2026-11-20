@@ -1,8 +1,61 @@
 # Rune integration checks
 
 Run these checks for every candidate Rune update before updating the application
-pin. The application and all six Cargo patches must point at the same tested
+pin. The Rune dependency and every Rune-sourced Cargo patch must point at the same tested
 fork revision; Rune's workspace patches are not inherited by applications.
+
+## Integration workflow
+
+“Run the Rune integration workflow” invokes this process. The primary agent
+coordinates the reviewer and implementer, checks their evidence, and resolves
+blockers rather than skipping a gate.
+
+1. **Preflight.** Check Snowbar and the permanent fork checkout for local
+   changes and unpublished work. Take the current fork revision from Snowbar's
+   manifest, not the sibling checkout's `HEAD`. Resolve `anomalyco/rune`'s `dev`
+   to an exact SHA and freeze it for this run. Use `gh` for GitHub reads and SSH
+   for GitHub Git transport. If the VM is unavailable, report it; don't search
+   unrelated local configuration for connection details.
+2. **Review upstream and plan the merge.** Ask the read-only reviewer for the
+   merge base, user-visible upstream changes, conflict risks, and changes to
+   Rune's Cargo patches. Check whether upstream replaces or only overlaps the
+   fork's reserved top layer/exclusive zone ([#138]), offset-safe keymap reads
+   ([#319]), or layer-shell wheel forwarding ([#699]). Identify migration
+   candidates, but don't drop a fork feature on the strength of an open issue
+   or a partial implementation. Confirm the findings before handing off.
+3. **Merge and review the resolution.** Have the implementer start from the
+   pinned fork commit on a new dated branch in an isolated scratch checkout.
+   Merge the frozen upstream SHA, preserving both sides' behavior and leaving
+   unrelated work and parked prototypes alone. Review the resulting diff
+   against both parents. Have the reviewer independently check meaningful
+   conflict resolutions, and resolve any findings before accepting the build.
+4. **Build and test a temporary Snowbar candidate.** Keep the real pin
+   unchanged. Point the candidate's Rune dependency and every Rune-sourced
+   patch at the same merge commit, adding or removing patches as needed.
+   An isolated local Git URL lets Cargo test an unpublished merge. Use the
+   pinned Nix shell to build the Linux binary and run focused Snowbar library
+   and binary tests and Clippy; check the Rune probe when relevant. Follow the
+   resource limits below. Rerun affected checks after fixing review findings.
+   Report the exact candidate SHA, check results, ignores, and skips.
+5. **Preview and get approval.** With permission to use the live VM session,
+   launch only the temporary candidate and guide the user through the
+   [niri checklist](#niri-vm-checklist), emphasizing any paths touched by the
+   merge (e.g. workspace scroll or Escape on a real keyboard). Never execute a
+   power action. Brief the user on upstream changes, fork features retained,
+   migration prospects and remaining gaps. Stop the preview after review.
+   Wait for explicit approval to publish and promote; a passing build by
+   itself is not approval.
+6. **Publish, promote, and clean up.** Publish the approved fork commit first
+   and verify the remote ref. Update Snowbar's production SSH pin and lockfile;
+   check that the resolution matches the tested candidate aside from the source
+   URL. Verify the locked dependency and record the upstream and merge SHAs,
+   test and VM results, and known gaps in `reuse-decision.md`. Commit the
+   dependency update with the evidence, push only when authorized, and follow
+   the [artifact cleanup checklist](#temporary-artifact-cleanup).
+
+[#138]: https://github.com/anomalyco/rune/issues/138
+[#319]: https://github.com/anomalyco/rune/issues/319
+[#699]: https://github.com/anomalyco/rune/issues/699
 
 ## Fork checkout and pin
 

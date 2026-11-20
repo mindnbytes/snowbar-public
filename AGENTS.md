@@ -2,6 +2,10 @@
 
 - Read `niri-rune-bar.md` before making project decisions; it defines the
   approved visual baseline, scope, development slices and review checkpoints.
+- When asked to run the Rune integration workflow, follow the
+  [Rune integration runbook](docs/rune-integration.md#integration-workflow):
+  delegate upstream review and implementation, then stop at the visual
+  approval gate before publishing or promoting the pin.
 - Use the project's pinned Nix development shell for development, builds,
   formatting, Clippy and tests. Run commands with `nix develop --command …`
   or enter `nix develop` first. Do not substitute the host's Rust toolchain or
