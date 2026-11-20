@@ -32,6 +32,13 @@
             # Cargo.lock contains tiny-skia-path 0.11.4 from both sources.
             cargoHash = "sha256-4chmEj07q8kbseSv7tHx1/3k9a5LhF9E1rEBd/kRNu8=";
 
+            # Rune's text crate embeds fonts from a sibling in the original
+            # workspace. Point it at that sibling's versioned vendor directory.
+            prePatch = ''
+              substituteInPlace "$cargoDepsCopy/source-git-0/rune-text-0.0.1/src/fonts/default_fonts.rs" \
+                --replace-fail "../../../rune/assets/" "../../../rune-0.0.1/assets/"
+            '';
+
             nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
             # Exercise Snowbar's tests without linking all of the study examples.
             cargoTestFlags = [ "--lib" "--bin" "snowbar" ];
