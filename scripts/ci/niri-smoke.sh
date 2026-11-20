@@ -248,12 +248,14 @@ jq -e --arg out "$output_name" '
 
 bar_line=$(grep -F 'get_layer_surface' "$logs/snowbar.log" | grep -F '"snowbar"' | tail -n 1 || true)
 [ -n "$bar_line" ] || fail "Wayland debug log has no get_layer_surface request for namespace \"snowbar\""
-layer_id=$(printf '%s\n' "$bar_line" | sed -n 's/.*zwlr_layer_surface_v1@\([0-9][0-9]*\).*/\1/p')
-surface_id=$(printf '%s\n' "$bar_line" | sed -n 's/.*wl_surface@\([0-9][0-9]*\).*/\1/p')
+# libwayland versions use either @ or # between the interface and object ID.
+layer_id=$(printf '%s\n' "$bar_line" | sed -n 's/.*zwlr_layer_surface_v1[#@]\([0-9][0-9]*\).*/\1/p')
+surface_id=$(printf '%s\n' "$bar_line" | sed -n 's/.*wl_surface[#@]\([0-9][0-9]*\).*/\1/p')
 [ -n "$layer_id" ] && [ -n "$surface_id" ] || fail "could not parse the bar's Wayland object IDs"
+layer="zwlr_layer_surface_v1[#@]$layer_id"
 
 i=0
-while ! grep -qE "zwlr_layer_surface_v1@${layer_id}\.configure\(" "$logs/snowbar.log"; do
+while ! grep -qE "$layer\.configure\(" "$logs/snowbar.log"; do
     kill -0 "$snowbar_pid" 2>/dev/null || fail "snowbar exited before receiving a layer-shell configure"
     i=$((i + 1))
     [ "$i" -lt 150 ] || fail "timed out waiting for a layer-shell configure"
@@ -261,7 +263,7 @@ while ! grep -qE "zwlr_layer_surface_v1@${layer_id}\.configure\(" "$logs/snowbar
 done
 # Prefer a settled configure if the compositor sent more than one.
 sleep 0.5
-configure_lines=$(grep -E "zwlr_layer_surface_v1@${layer_id}\.configure\(" "$logs/snowbar.log" || true)
+configure_lines=$(grep -E "$layer\.configure\(" "$logs/snowbar.log" || true)
 configure_line=$(printf '%s\n' "$configure_lines" | grep -E "configure\([0-9]+, ${output_width}, 40\)" | tail -n 1 || true)
 if [ -z "$configure_line" ]; then
     printf 'configures seen:\n%s\n' "$configure_lines" >&2
@@ -277,17 +279,17 @@ configure_height=$(printf '%s\n' "$configure_args" | cut -d, -f3 | tr -d ' ')
 [ "$configure_height" -eq 40 ] ||
     fail "bar configure height $configure_height is not the expected 40px"
 
-grep -qF "zwlr_layer_surface_v1@${layer_id}.set_exclusive_zone(40)" "$logs/snowbar.log" ||
+grep -qE "$layer\.set_exclusive_zone\(40\)" "$logs/snowbar.log" ||
     fail "the bar did not request its expected positive 40px exclusive zone"
-grep -qF "zwlr_layer_surface_v1@${layer_id}.set_anchor(13)" "$logs/snowbar.log" ||
+grep -qE "$layer\.set_anchor\(13\)" "$logs/snowbar.log" ||
     fail "the bar is not anchored to the top, left and right edges (anchor bits 13)"
 
 i=0
-while ! awk -v surface="wl_surface@$surface_id" '
-    index($0, surface ".attach(") {
-        attached = index($0, surface ".attach(wl_buffer@") != 0
+while ! awk -v surface="wl_surface[#@]$surface_id" '
+    $0 ~ (surface "\\.attach\\(") {
+        attached = $0 ~ (surface "\\.attach\\(wl_buffer[#@]")
     }
-    attached && index($0, surface ".commit()") { mapped = 1; exit }
+    attached && $0 ~ (surface "\\.commit\\(\\)") { mapped = 1; exit }
     END { exit !mapped }
 ' "$logs/snowbar.log"; do
     kill -0 "$snowbar_pid" 2>/dev/null || fail "snowbar exited before committing a non-null buffer"
