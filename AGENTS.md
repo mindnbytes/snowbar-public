@@ -2,6 +2,15 @@
 
 - Read `niri-rune-bar.md` before making project decisions; it defines the
   approved visual baseline, scope, development slices and review checkpoints.
+- Start each new implementation task on a topic branch based on the latest
+  `origin/master`; never implement directly on `master`. Continue follow-up
+  work on its existing topic branch and preserve unrelated local changes.
+  For delegated work, the coordinating agent sets up the branch before
+  dispatch; workers sharing a checkout must not switch that checkout's branch.
+- When authorized to run hosted CI, push the topic branch and open or update
+  a draft pull request early so GitHub Actions can run the Linux build checks.
+  Report the results, keep visual and click checks manual, and wait for
+  approval before merging.
 - When asked to run the Rune integration workflow, follow the
   [Rune integration runbook](docs/rune-integration.md#integration-workflow):
   delegate upstream review and implementation, then stop at the visual
