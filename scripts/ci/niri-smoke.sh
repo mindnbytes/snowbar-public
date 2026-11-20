@@ -94,6 +94,15 @@ if [ -n "${SNOWBAR_SMOKE_MESA:-}" ] && [ -d "$SNOWBAR_SMOKE_MESA/lib/dri" ]; the
     LIBGL_DRIVERS_PATH="$SNOWBAR_SMOKE_MESA/lib/dri${LIBGL_DRIVERS_PATH:+:$LIBGL_DRIVERS_PATH}"
     export LIBGL_DRIVERS_PATH
 fi
+if [ -n "${SNOWBAR_SMOKE_MESA:-}" ]; then
+    for vendor in "$SNOWBAR_SMOKE_MESA"/share/glvnd/egl_vendor.d/*mesa*.json \
+                  "$SNOWBAR_SMOKE_MESA"/etc/glvnd/egl_vendor.d/*mesa*.json; do
+        [ -f "$vendor" ] || continue
+        __EGL_VENDOR_LIBRARY_FILENAMES="$vendor"
+        export __EGL_VENDOR_LIBRARY_FILENAMES
+        break
+    done
+fi
 vulkan_icds=
 if [ -n "${SNOWBAR_SMOKE_MESA:-}" ] && [ -d "$SNOWBAR_SMOKE_MESA/share/vulkan/icd.d" ]; then
     for icd in "$SNOWBAR_SMOKE_MESA"/share/vulkan/icd.d/*lvp*.json; do
@@ -108,13 +117,12 @@ fi
 
 LIBGL_ALWAYS_SOFTWARE=1
 GALLIUM_DRIVER=llvmpipe
-MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 WGPU_POWER_PREF=low
 RUNE_GPU_LOG=1
 TZ=UTC
 XDG_SESSION_TYPE=wayland
 XDG_CURRENT_DESKTOP=niri
-export LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE
+export LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
 export WGPU_POWER_PREF RUNE_GPU_LOG TZ XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 # A hosted runner has no X server; do not let winit fall back to X11 or an
 # inherited WAYLAND_SOCKET.
@@ -135,14 +143,15 @@ if ! niri validate --config "$config_file" >"$logs/niri-validate.log" 2>&1; then
     fail "niri rejected the smoke config"
 fi
 
-# Host compositor: headless Weston with its GL renderer on Mesa software.
+# The outer compositor needs only CPU rendering; nested niri can use Mesa
+# software EGL without requiring Weston itself to provide surfaceless EGL.
 XDG_RUNTIME_DIR="$workdir/host-runtime" \
 HOME="$workdir/home" \
 XDG_CONFIG_HOME="$workdir/config" \
 XDG_CACHE_HOME="$workdir/cache" \
     weston \
         --backend=headless \
-        --renderer=gl \
+        --renderer=pixman \
         --width=1280 \
         --height=800 \
         --socket=wayland-host \
