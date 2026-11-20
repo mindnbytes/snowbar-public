@@ -19,6 +19,7 @@ presented as current state.
 
 | Document | Status | Read when |
 |---|---|---|
+| [`ci.md`](ci.md) | Current CI design; staged rollout | Before changing pull-request jobs, the docs-only classifier, required checks, or the `SNOWBAR_SKIP_DOCS_CI` variable. |
 | [`rune-integration.md`](rune-integration.md) | Current checklist | Before updating the Rune pin, running Linux/Rune checks, or doing the niri VM checklist. Contains the resource limits for heavy tests. |
 | [`reuse-decision.md`](reuse-decision.md) | Decision record, completed 2026-11-10; integration updates through 2026-11-17 | Before revisiting Hokum/Ashell/Rune reuse, the fork rationale, or earlier probe evidence. Historical pins; not the current dependency source. |
 | [`workspace-policy.md`](workspace-policy.md) | Current behavior note | Before changing workspace display, output selection, focus actions, or reconnect behavior. Single-output scope and verified/unverified boundaries live here. |
