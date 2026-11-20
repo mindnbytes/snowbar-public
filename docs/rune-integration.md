@@ -106,3 +106,21 @@ the installed bar. Record the fork commit and results before updating the pin.
 
 Do not infer a pass for untested items. Update `Cargo.toml` and `Cargo.lock`
 only after reviewing the candidate's results and remaining risks.
+
+## Temporary artifact cleanup
+
+- Create one dedicated scratch root per integration on each host, rather than
+  leaving separate clones and candidate directories beside the permanent
+  checkouts. Record the paths of temporary worktrees, bare repositories,
+  Snowbar candidates and VM flake copies as they are created.
+- Once a candidate is promoted or abandoned, stop its preview and confirm no
+  build is using those paths. Before removal, check for local edits, untracked
+  user files, and commits or refs that are not preserved elsewhere. For a
+  promoted merge, verify the published fork revision and Snowbar pin. If any
+  work is unique or ownership is unclear, keep it and report why.
+- Remove Git worktrees with `git worktree remove` without forcing. Then remove
+  only the confirmed disposable paths, including candidate build output, bare
+  mirrors and VM flake copies. Never remove the permanent `rune-integration`
+  checkout, the Snowbar checkout, or shared caches as part of this cleanup.
+- If review is paused or artifacts are still needed, list what remains and
+  why. Revisit cleanup when that work finishes.

@@ -13,6 +13,11 @@
   Never compile or run the full Rune test suite or heavy `--all-targets` test
   links on the local Mac or VM without explicit user approval, as neither
   machine has enough RAM for those large test binaries.
+- Keep temporary Rune integration worktrees, clones, and builds under a
+  dedicated scratch directory on each host. Track their paths and clean them
+  up after promotion or abandonment once they contain no unique work; keep
+  the permanent `rune-integration` checkout. See `docs/rune-integration.md`
+  for the cleanup checklist.
 - Work in small, verifiable slices and pause at meaningful review points. Keep
   the approved visuals and future palette configurability in mind without
   building speculative infrastructure.
