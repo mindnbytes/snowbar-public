@@ -47,7 +47,7 @@ blockers rather than skipping a gate.
    itself is not approval.
 6. **Publish, promote, and clean up.** Publish the approved fork commit first
    and verify the remote ref. Update Snowbar's production anonymous HTTPS Cargo
-   pin, lockfile, and Rune `cargoLock.outputHashes` entry in `flake.nix`; check
+   pin, lockfile, and `cargoHash` in `flake.nix`; check
    that the resolution matches the tested candidate aside from the source URL.
    Verify the locked dependency and record the upstream and merge SHAs, test
    and VM results, and known gaps in `reuse-decision.md`. Commit the dependency

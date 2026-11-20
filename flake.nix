@@ -28,14 +28,9 @@
 
             src = ./.;
 
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-              outputHashes = {
-                # Every crate from the Rune fork revision shares this hash;
-                # importCargoLock deduplicates it by revision.
-                "rune-0.0.1" = "sha256-Mj7KQJLV7TCtmTu+P5fbZ0+vp+oXfAiuw2BOHqmaPoQ=";
-              };
-            };
+            # Keep registry and Git crates in separate vendor directories:
+            # Cargo.lock contains tiny-skia-path 0.11.4 from both sources.
+            cargoHash = "sha256-4chmEj07q8kbseSv7tHx1/3k9a5LhF9E1rEBd/kRNu8=";
 
             nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
             # Exercise Snowbar's tests without linking all of the study examples.
