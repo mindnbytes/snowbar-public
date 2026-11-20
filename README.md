@@ -17,10 +17,11 @@ nix run github:mindnbytes/snowbar-public
 nix profile install github:mindnbytes/snowbar-public
 ```
 
-To build and run from a checkout, no development shell is needed:
+On Linux, build and run from the root of a Snowbar Git checkout without
+entering a development shell:
 
 ```sh
-nix build .#snowbar
+nix build "git+file://$(pwd -P)#snowbar"
 ./result/bin/snowbar
 ```
 
@@ -35,6 +36,28 @@ environment.
 cargo build --locked --bin snowbar
 ./target/debug/snowbar
 ```
+
+## Developing with Nix
+
+From the root of the Snowbar Git checkout, enter the pinned development shell
+or run a single command in it:
+
+```sh
+nix develop "git+file://$(pwd -P)"
+nix develop "git+file://$(pwd -P)" --command cargo fmt --check
+```
+
+Use an explicit `git+file://` reference for local Nix commands and when another
+flake takes a local Snowbar input or input override. Nix uses Git to select
+files, so untracked files such as Cargo's `target/` stay out of the store.
+New source files must be added to Git before they can appear in the flake
+snapshot. A `path:` reference snapshots the directory without respecting
+`.gitignore`, before any filter in `flake.nix` can run. A bare path or implicit
+flake can fall back to the same behavior if Git metadata is missing.
+
+For a temporary VM copy without Git metadata, use the
+[shell-only procedure](docs/rune-integration.md#temporary-vm-checkout-and-nix-source-copying)
+instead of pointing Nix at the copy.
 
 ## Single-output limitation
 

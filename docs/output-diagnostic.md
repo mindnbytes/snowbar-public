@@ -9,9 +9,10 @@ a live placement or hotplug test.
 At the time of this diagnostic, Rune was pinned at
 `90ce05442d379849679ab435950c86babb6ba9e7` and `niri-ipc` at
 `26.4.0`. `examples/display_diagnostic.rs` prints Rune's startup display
-snapshot and creates no window or layer surface. Run it in a graphical session
-with `nix develop --command cargo run --locked --example display_diagnostic`;
-compare separately with `niri msg --json outputs` and `niri msg --json workspaces`.
+snapshot and creates no window or layer surface. In a graphical session, run
+`cargo run --locked --example display_diagnostic` in the
+[pinned Nix shell](../README.md#developing-with-nix). Compare separately with
+`niri msg --json outputs` and `niri msg --json workspaces`.
 
 ## Source findings
 

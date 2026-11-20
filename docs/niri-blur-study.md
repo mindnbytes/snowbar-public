@@ -40,8 +40,9 @@ layer-rule {
 }
 ```
 
-Run with `nix develop --command cargo run --example niri_blur_study` only after
-the rule and session procedure are approved. A rule blurs the entire rectangular
+Run `cargo run --example niri_blur_study` in the
+[pinned Nix shell](../README.md#developing-with-nix) only after the rule and
+session procedure are approved. A rule blurs the entire rectangular
 surface, including transparent margins: it is a capability/appearance probe,
 not a correct capsule-shaped blur. `xray false` asks for windows behind the
 surface; niri documents it as experimental and more expensive. Its default xray

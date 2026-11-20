@@ -16,9 +16,16 @@
   delegate upstream review and implementation, then stop at the visual
   approval gate before publishing or promoting the pin.
 - Use the project's pinned Nix development shell for development, builds,
-  formatting, Clippy and tests. Run commands with `nix develop --command …`
-  or enter `nix develop` first. Do not substitute the host's Rust toolchain or
-  an unpinned environment; if the shell is unavailable, report the blocker.
+  formatting, Clippy and tests. From the Snowbar Git root, run
+  `nix develop "git+file://$(pwd -P)" --command …` or enter that shell first.
+  Use an explicit `git+file://` reference for all local Snowbar flake commands,
+  inputs and overrides. Do not use `path:`, a bare path, or an implicit flake
+  for the checkout: a directory snapshot can copy `target/` into the Nix
+  store even though Git ignores it. If Git metadata is missing, do not retry
+  with a directory reference; see the
+  [shell-only VM procedure](docs/rune-integration.md#temporary-vm-checkout-and-nix-source-copying).
+  Do not substitute the host's Rust toolchain or an unpinned environment;
+  if the shell is unavailable, report the blocker.
 - Use the existing niri VM for Linux/Wayland integration checks when needed.
   Keep the bar project separate from the VM configuration and do not modify
   a live session or invoke power actions without explicit approval. See
