@@ -200,7 +200,7 @@ NIRI_SOCKET="$niri_socket" niri msg version >"$logs/versions.txt" 2>&1 || true
 niri --version >>"$logs/versions.txt" 2>&1 || true
 weston --version >>"$logs/versions.txt" 2>&1 || true
 
-NIRI_SOCKET="$niri_socket" niri msg outputs --json >"$logs/outputs.json" 2>"$logs/outputs.err" || {
+NIRI_SOCKET="$niri_socket" niri msg --json outputs >"$logs/outputs.json" 2>"$logs/outputs.err" || {
     cat "$logs/outputs.err" >&2
     fail "niri outputs query failed"
 }
@@ -225,7 +225,7 @@ snowbar_pid=$!
 
 i=0
 while ! (
-    NIRI_SOCKET="$niri_socket" niri msg layers --json >"$logs/layers.json" 2>/dev/null &&
+    NIRI_SOCKET="$niri_socket" niri msg --json layers >"$logs/layers.json" 2>/dev/null &&
     jq -e 'any(.[]; .namespace == "snowbar")' "$logs/layers.json" >/dev/null 2>&1
 ); do
     kill -0 "$snowbar_pid" 2>/dev/null || fail "snowbar exited before mapping its bar layer"
@@ -235,7 +235,7 @@ while ! (
 done
 
 sleep 0.5
-NIRI_SOCKET="$niri_socket" niri msg layers --json >"$logs/layers.json" 2>"$logs/layers.err" || {
+NIRI_SOCKET="$niri_socket" niri msg --json layers >"$logs/layers.json" 2>"$logs/layers.err" || {
     cat "$logs/layers.err" >&2
     fail "niri layers query failed"
 }
@@ -304,7 +304,7 @@ if NIRI_SOCKET="$niri_socket" timeout 15 niri msg action screenshot-screen \
     sleep 1
 fi
 
-NIRI_SOCKET="$niri_socket" niri msg layers --json >"$logs/layers.final.json" 2>/dev/null || true
+NIRI_SOCKET="$niri_socket" niri msg --json layers >"$logs/layers.final.json" 2>/dev/null || true
 
 printf 'smoke passed: namespace=snowbar layer=top output=%s configure=%sx%s exclusive_zone=40\n' \
     "$output_name" "$configure_width" "$configure_height"
