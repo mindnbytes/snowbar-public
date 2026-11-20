@@ -205,7 +205,9 @@ validation and reload behavior when that slice is actually planned.
 - Prefer the minimal working solution; explain trade-offs before adding crates/processes/abstractions.
 - Prefer delegating straightforward and easily testable pieces of work to subagent, use OpenAI GPT-6 Luna.
 - Pin Rune and other unstable dependencies. Keep `Cargo.lock` and `flake.lock` committed.
-- Use `nix develop` + `cargo` for rapid iteration; reserve `nix build` for packaging validation. Do not rebuild all of NixOS after every UI edit.
+- Use the [pinned Nix shell with an explicit Git flake reference](README.md#developing-with-nix)
+  and Cargo for rapid iteration; reserve `nix build` for packaging validation.
+  Do not rebuild all of NixOS after every UI edit.
 - Work on the bar repository independently of the host's main NixOS configuration; never modify a live session or perform power actions without explicit approval.
 - Update this document when decisions materially change; capture important choices in a **short** ADR only when justified.
 

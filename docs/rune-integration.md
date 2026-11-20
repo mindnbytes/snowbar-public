@@ -87,10 +87,10 @@ fork's docs, issues and commits.
 
 ## Automated checks
 
-On Linux, in the project's development shell, run:
+On Linux, from the root of the Snowbar Git checkout, run:
 
 ```sh
-nix develop --command sh scripts/check-rune-integration.sh
+nix develop "git+file://$(pwd -P)" --command sh scripts/check-rune-integration.sh
 ```
 
 This checks the Snowbar binary using the committed lockfile; it does **not**
@@ -105,8 +105,8 @@ debug info. On a sufficiently provisioned machine, optional broader checks
 include Snowbar's all-target tests and Rune's overlay tests:
 
 ```sh
-nix develop --command env CARGO_BUILD_JOBS=2 cargo test --locked --all-targets
-nix develop --command env CARGO_BUILD_JOBS=2 cargo test -p rune --lib overlay::
+nix develop "git+file://$(pwd -P)" --command env CARGO_BUILD_JOBS=2 cargo test --locked --all-targets
+nix develop "git+file://$(pwd -P)" --command env CARGO_BUILD_JOBS=2 cargo test -p rune --lib overlay::
 ```
 
 Compiling Rune's test binary is very resource-intensive even when tests are
@@ -126,15 +126,23 @@ require a compatible LLD and SDK. Never disable compact unwind as a workaround.
 
 ### Temporary VM checkout and Nix source copying
 
-If a candidate is copied to the VM without its Git metadata, running
-`nix develop` from that directory can copy the entire directory into the Nix
-store, including an existing `target/` build tree. This can look like a stalled
-launch and consume substantial disk space. For repeated commands, use a
-separate small directory containing copies of the candidate's pinned
-`flake.nix` and `flake.lock`, and run `nix develop /path/to/that-directory
---command ...` from the candidate directory. Verify the copies match the
-candidate's files. This still uses the project's pinned shell while keeping
-build output out of the flake source; do not substitute the host toolchain.
+For a Git checkout, use the [explicit Git flake reference](../README.md#developing-with-nix).
+If a candidate is copied to the VM without its Git metadata, never point Nix
+at the candidate directory itself. A directory snapshot would include the
+`target/` build tree even though Git ignores it.
+
+Create a separate scratch directory containing **only** copies of the
+candidate's pinned `flake.nix` and `flake.lock`, and verify the copies match.
+From the candidate directory, enter the pinned shell with:
+
+```sh
+nix develop 'path:/absolute/path/to/shell-only-dir'
+```
+
+Here `path:` deliberately snapshots just the two flake files. Run Cargo from
+the candidate directory, not the shell-only directory. Use this for the
+development shell only, not for `nix build`; the two-file snapshot does not
+contain the package source.
 
 ## Niri VM checklist
 

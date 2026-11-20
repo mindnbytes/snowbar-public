@@ -11,9 +11,10 @@ Automated tests never execute logout, restart or shutdown.
 - `src/main.rs` owns the Rune popover, layout, input and headless tests.
 - `src/power_os.rs` owns the real Linux effects; it is excluded from test builds.
 
-Run `nix develop --command env CARGO_BUILD_JOBS=2 cargo test --locked --lib --bin snowbar`
-for the focused suite. Keep new tests on the fake backend; use the manual
-checklist below for compositor and system behavior.
+Run `env CARGO_BUILD_JOBS=2 cargo test --locked --lib --bin snowbar` in the
+[pinned Nix shell](../README.md#developing-with-nix) for the focused suite.
+Keep new tests on the fake backend; use the manual checklist below for
+compositor and system behavior.
 
 ## Actions and exact mappings
 
