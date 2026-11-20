@@ -1,0 +1,44 @@
+name: Build the pinned Nix package
+description: Install Nix, assert the native runner architecture, and build Snowbar.
+inputs:
+  machine:
+    description: Expected runner machine from uname -m.
+    required: true
+  system:
+    description: Expected Nix system for both the runner and the package.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    # Assert this leg is what its name claims: a native runner of the expected
+    # machine type, whose Nix evaluates the package for itself rather than
+    # cross-building or substituting another platform.
+    - name: Assert the native runner architecture
+      shell: bash
+      env:
+        EXPECTED_MACHINE: ${{ inputs.machine }}
+        EXPECTED_SYSTEM: ${{ inputs.system }}
+      run: |
+        set -eu
+        machine=$(uname -m)
+        native_system=$(nix eval --raw --impure --expr builtins.currentSystem)
+        package_system=$(nix eval --raw "git+file://$(pwd -P)#snowbar.system")
+        test "$machine" = "$EXPECTED_MACHINE"
+        test "$native_system" = "$EXPECTED_SYSTEM"
+        test "$package_system" = "$EXPECTED_SYSTEM"
+        printf 'Runner machine %s, native Nix system %s, package system %s\n' \
+          "$machine" "$native_system" "$package_system"
+
+    - name: Build the packaged Snowbar
+      shell: bash
+      run: |
+        set -eu
+        out=$(nix build "git+file://$(pwd -P)#snowbar" --no-link --print-out-paths --print-build-logs)
+        test -x "$out/bin/snowbar"
+        printf 'Packaged Snowbar: %s/bin/snowbar\n' "$out"

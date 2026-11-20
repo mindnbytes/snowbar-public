@@ -7,15 +7,24 @@ name: CI
 #   - "Anonymous Cargo build"
 #   - "Nix package build"         (x86_64-linux)
 #   - "Nix package build (ARM64)" (aarch64-linux)
+#   - "CI gate"                   (stable aggregate gate)
 #
-# The ARM64 leg is a matrix entry on GitHub's standard public-repository arm64
-# runner (`ubuntu-24.04-arm`) and builds the same pinned flake package
-# natively, including the package's focused Snowbar tests. The anonymous
-# Cargo build and nested-compositor smoke test run on x86_64 only.
+# The two Nix legs are separate jobs with the same display names as the former
+# matrix entries. The gate checks each architecture's result directly instead
+# of relying on matrix fan-in aggregation. Both legs build the same pinned
+# flake package natively, including the package's focused Snowbar tests. The
+# anonymous Cargo build and nested-compositor smoke test run on x86_64 only.
 #
 # "Experimental niri layer-shell smoke" is deliberately a separate check and is
-# not intended to be required yet. Keep its failures visible while it builds
-# a track record on hosted runners.
+# not required by the gate yet. Keep its failures visible while it builds a
+# track record on hosted runners.
+#
+# A pull request whose complete Git diff (merge base to head) touches only
+# AGENTS.md, README.md, niri-rune-bar.md or Markdown under docs/ may skip the
+# build jobs. That is opt-in and happens only when the repository variable
+# SNOWBAR_SKIP_DOCS_CI is exactly "true". If the variable is absent or any
+# other value, a successful classification keeps every existing check and the
+# smoke test running as before. A classifier error blocks the gate.
 #
 # No job uses repository secrets, persisted checkout credentials, SSH, or a
 # shared Cargo cache. The Cargo job proves the pinned Rune fork fetches over
@@ -32,8 +41,49 @@ permissions:
   contents: read
 
 jobs:
+  ci-classifier:
+    name: Docs-only classifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+    steps:
+      - name: Check out full PR history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test the docs-only classifier
+        run: bash scripts/ci/tests/docs-only-test.sh
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIP_DOCS_CI: ${{ vars.SNOWBAR_SKIP_DOCS_CI }}
+        run: |
+          set -eu
+          result=$(bash scripts/ci/docs-only.sh "$BASE_SHA" "$HEAD_SHA")
+          case "$result" in
+            docs_only=true|docs_only=false) ;;
+            *)
+              echo "::error::docs-only classifier returned an unexpected result"
+              exit 1
+              ;;
+          esac
+          mode=full
+          if [ "$result" = docs_only=true ] && [ "$SKIP_DOCS_CI" = true ]; then
+            mode=docs-only
+          fi
+          printf 'Docs-only classifier: %s, mode=%s\n' "$result" "$mode"
+          printf 'mode=%s\n' "$mode" >>"$GITHUB_OUTPUT"
+
   anonymous-cargo-build:
     name: Anonymous Cargo build
+    needs: ci-classifier
+    if: ${{ needs['ci-classifier'].outputs.mode == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -113,26 +163,11 @@ jobs:
           test -x "$target_dir/debug/snowbar"
           echo "Built $target_dir/debug/snowbar with an empty CARGO_HOME=$cargo_home"
 
-  nix-package-build:
-    # Both legs run the same steps against the same pinned flake. The display
-    # names stay explicit: "Nix package build" is unchanged, and
-    # "Nix package build (ARM64)" is the stable name for the
-    # native arm64 check.
-    name: ${{ matrix.name }}
-    strategy:
-      # Keep the x86_64 result even if the new arm64 leg needs rework.
-      fail-fast: false
-      matrix:
-        include:
-          - name: Nix package build
-            runner: ubuntu-24.04
-            machine: x86_64
-            system: x86_64-linux
-          - name: Nix package build (ARM64)
-            runner: ubuntu-24.04-arm
-            machine: aarch64
-            system: aarch64-linux
-    runs-on: ${{ matrix.runner }}
+  nix-package-build-x86_64:
+    name: Nix package build
+    needs: ci-classifier
+    if: ${{ needs['ci-classifier'].outputs.mode == 'full' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - name: Check out without persisted credentials
@@ -140,36 +175,34 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      - name: Build the pinned package natively
+        uses: ./.github/actions/nix-package-build
         with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+          machine: x86_64
+          system: x86_64-linux
 
-      # Assert this leg is what its name claims: a native runner of the
-      # expected machine type, whose Nix evaluates the package for itself
-      # rather than cross-building or substituting another platform.
-      - name: Assert the native runner architecture
-        run: |
-          set -eu
-          machine=$(uname -m)
-          native_system=$(nix eval --raw --impure --expr builtins.currentSystem)
-          package_system=$(nix eval --raw .#snowbar.system)
-          test "$machine" = "${{ matrix.machine }}"
-          test "$native_system" = "${{ matrix.system }}"
-          test "$package_system" = "${{ matrix.system }}"
-          printf 'Runner machine %s, native Nix system %s, package system %s\n' \
-            "$machine" "$native_system" "$package_system"
+  nix-package-build-arm64:
+    name: Nix package build (ARM64)
+    needs: ci-classifier
+    if: ${{ needs['ci-classifier'].outputs.mode == 'full' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Build the packaged Snowbar
-        run: |
-          set -eu
-          out=$(nix build .#snowbar --no-link --print-out-paths --print-build-logs)
-          test -x "$out/bin/snowbar"
-          printf 'Packaged Snowbar: %s/bin/snowbar\n' "$out"
+      - name: Build the pinned package natively
+        uses: ./.github/actions/nix-package-build
+        with:
+          machine: aarch64
+          system: aarch64-linux
 
   niri-smoke:
     name: Experimental niri layer-shell smoke
+    needs: ci-classifier
+    if: ${{ needs['ci-classifier'].outputs.mode == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -221,3 +254,55 @@ jobs:
           path: ${{ runner.temp }}/snowbar-smoke
           if-no-files-found: ignore
           retention-days: 7
+
+  # Always report this check. The three build results are the existing stable
+  # names; the experimental smoke remains independent and can be red without
+  # failing the gate. A classifier failure, malformed output, or unexpected
+  # build result fails the gate.
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - ci-classifier
+      - anonymous-cargo-build
+      - nix-package-build-x86_64
+      - nix-package-build-arm64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify required outcomes
+        env:
+          CLASSIFIER_RESULT: ${{ needs['ci-classifier'].result }}
+          CI_MODE: ${{ needs['ci-classifier'].outputs.mode }}
+          CARGO_RESULT: ${{ needs['anonymous-cargo-build'].result }}
+          X86_64_RESULT: ${{ needs['nix-package-build-x86_64'].result }}
+          ARM64_RESULT: ${{ needs['nix-package-build-arm64'].result }}
+        run: |
+          set -eu
+          fail() {
+            echo "::error::$*"
+            exit 1
+          }
+          require_result() {
+            label=$1
+            actual=$2
+            expected=$3
+            if [ "$actual" != "$expected" ]; then
+              fail "$label: expected $expected, got ${actual:-missing}"
+            fi
+            printf '%s: %s\n' "$label" "$actual"
+          }
+
+          [ "$CLASSIFIER_RESULT" = success ] ||
+            fail "Docs-only classifier did not succeed: ${CLASSIFIER_RESULT:-missing}"
+
+          case "$CI_MODE" in
+            docs-only) expected=skipped ;;
+            full) expected=success ;;
+            *) fail "Docs-only classifier returned no valid CI mode" ;;
+          esac
+
+          require_result "Anonymous Cargo build" "$CARGO_RESULT" "$expected"
+          require_result "Nix package build" "$X86_64_RESULT" "$expected"
+          require_result "Nix package build (ARM64)" "$ARM64_RESULT" "$expected"
+          printf 'CI gate passed in %s mode.\n' "$CI_MODE"
