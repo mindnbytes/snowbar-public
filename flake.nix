@@ -1,5 +1,5 @@
 {
-  description = "Development environment for the niri Rune bar";
+  description = "Niri Rune bar";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/f9a75f41be3a74eab55d3a7679d34ad6cc0da977";
 
@@ -7,6 +7,9 @@
     let
       systems = [ "aarch64-linux" "x86_64-linux" "aarch64-darwin" ];
       forSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      linuxSystems = [ "aarch64-linux" "x86_64-linux" ];
+      forLinuxSystems = f:
+        nixpkgs.lib.genAttrs linuxSystems (system: f nixpkgs.legacyPackages.${system});
     in {
       devShells = forSystems (pkgs: {
         default = pkgs.mkShell ({
@@ -16,5 +19,52 @@
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath (with pkgs; [ libxkbcommon wayland vulkan-loader libGL ])}:/run/opengl-driver/lib";
         });
       });
+
+      packages = forLinuxSystems (pkgs:
+        let
+          snowbar = pkgs.rustPlatform.buildRustPackage {
+            pname = "snowbar";
+            inherit ((pkgs.lib.importTOML ./Cargo.toml).package) version;
+
+            src = ./.;
+
+            # Keep registry and Git crates in separate vendor directories:
+            # Cargo.lock contains tiny-skia-path 0.11.4 from both sources.
+            cargoHash = "sha256-4chmEj07q8kbseSv7tHx1/3k9a5LhF9E1rEBd/kRNu8=";
+
+            # Rune's text crate embeds fonts from a sibling in the original
+            # workspace. Point it at that sibling's versioned vendor directory.
+            prePatch = ''
+              substituteInPlace "$cargoDepsCopy/source-git-0/rune-text-0.0.1/src/fonts/default_fonts.rs" \
+                --replace-fail "../../../rune/assets/" "../../../rune-0.0.1/assets/"
+            '';
+
+            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
+            # Exercise Snowbar's tests without linking all of the study examples.
+            cargoTestFlags = [ "--lib" "--bin" "snowbar" ];
+
+            # Rune loads Wayland, xkbcommon, Vulkan/GL and fontconfig at
+            # runtime. The wrapper puts them on the loader path for packaged
+            # use outside `nix develop`.
+            buildInputs = with pkgs;
+              [ libxkbcommon wayland vulkan-loader libGL fontconfig ];
+
+            postFixup = ''
+              wrapProgram $out/bin/snowbar \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [ libxkbcommon wayland vulkan-loader libGL fontconfig ])}:/run/opengl-driver/lib" \
+                --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.systemd ]}"
+            '';
+
+            meta = {
+              description = "Minimal niri top bar built with Rune";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "snowbar";
+              platforms = pkgs.lib.platforms.linux;
+            };
+          };
+        in {
+          inherit snowbar;
+          default = snowbar;
+        });
     };
 }

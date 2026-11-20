@@ -1,0 +1,223 @@
+name: CI
+
+# Pull-request verification for Snowbar packaging.
+#
+# The stable checks below use explicit display names so rulesets can target
+# them:
+#   - "Anonymous Cargo build"
+#   - "Nix package build"         (x86_64-linux)
+#   - "Nix package build (ARM64)" (aarch64-linux)
+#
+# The ARM64 leg is a matrix entry on GitHub's standard public-repository arm64
+# runner (`ubuntu-24.04-arm`) and builds the same pinned flake package
+# natively, including the package's focused Snowbar tests. The anonymous
+# Cargo build and nested-compositor smoke test run on x86_64 only.
+#
+# "Experimental niri layer-shell smoke" is deliberately a separate check and is
+# not intended to be required yet. Keep its failures visible while it builds
+# a track record on hosted runners.
+#
+# No job uses repository secrets, persisted checkout credentials, SSH, or a
+# shared Cargo cache. The Cargo job proves the pinned Rune fork fetches over
+# anonymous HTTPS with an empty HOME and CARGO_HOME.
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  anonymous-cargo-build:
+    name: Anonymous Cargo build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert anonymous HTTPS and one Rune revision
+        run: |
+          set -eu
+          if grep -RInE 'ssh://|git@github\.com[:/]' Cargo.toml Cargo.lock flake.nix flake.lock; then
+            echo "::error::Cargo or flake inputs still reference an SSH GitHub source; this job verifies anonymous HTTPS only."
+            exit 1
+          fi
+          rune_revs=$(grep -E 'rune\.git.*rev = "[0-9a-f]{40}"' Cargo.toml | grep -o 'rev = "[0-9a-f]\{40\}"' | cut -d'"' -f2 | sort -u)
+          if [ "$(printf '%s\n' "$rune_revs" | grep -c .)" -ne 1 ]; then
+            echo "::error::Cargo.toml must name exactly one 40-hex Rune revision across the dependency and patches."
+            printf 'Found revisions:\n%s\n' "$rune_revs" >&2
+            exit 1
+          fi
+          echo "No SSH GitHub sources found; Rune revision: $rune_revs"
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build Snowbar with an empty Cargo home
+        env:
+          CARGO_BUILD_JOBS: "2"
+          CARGO_NET_GIT_FETCH_WITH_CLI: "false"
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_ASKPASS: /bin/false
+        run: |
+          set -eu
+          anonymous_home="${RUNNER_TEMP:?}/anonymous-home"
+          cargo_home="${RUNNER_TEMP:?}/anonymous-cargo-home"
+          target_dir="${RUNNER_TEMP:?}/anonymous-target"
+          rm -rf "$anonymous_home" "$cargo_home" "$target_dir"
+          mkdir -p "$anonymous_home" "$cargo_home" "$target_dir"
+          [ -z "$(ls -A "$anonymous_home")" ] || {
+            echo "::error::anonymous HOME is not empty"
+            exit 1
+          }
+          [ -z "$(ls -A "$cargo_home")" ] || {
+            echo "::error::CARGO_HOME is not empty"
+            exit 1
+          }
+
+          # The project's pinned dev shell supplies Rust and the native
+          # libraries. Inside it, HOME and CARGO_HOME are fresh and empty, and
+          # SSH agents/askpass helpers are removed, so the build cannot use a
+          # cached registry, git credentials or an SSH key.
+          nix develop --command env \
+            -u SSH_AUTH_SOCK -u SSH_ASKPASS \
+            HOME="$anonymous_home" \
+            CARGO_HOME="$cargo_home" \
+            CARGO_TARGET_DIR="$target_dir" \
+            cargo --version
+          nix develop --command env \
+            -u SSH_AUTH_SOCK -u SSH_ASKPASS \
+            HOME="$anonymous_home" \
+            CARGO_HOME="$cargo_home" \
+            CARGO_TARGET_DIR="$target_dir" \
+            rustc --version
+          nix develop --command env \
+            -u SSH_AUTH_SOCK -u SSH_ASKPASS \
+            HOME="$anonymous_home" \
+            CARGO_HOME="$cargo_home" \
+            CARGO_TARGET_DIR="$target_dir" \
+            cargo build --locked --bin snowbar
+
+          test -x "$target_dir/debug/snowbar"
+          echo "Built $target_dir/debug/snowbar with an empty CARGO_HOME=$cargo_home"
+
+  nix-package-build:
+    # Both legs run the same steps against the same pinned flake. The display
+    # names stay explicit: "Nix package build" is unchanged, and
+    # "Nix package build (ARM64)" is the stable name for the
+    # native arm64 check.
+    name: ${{ matrix.name }}
+    strategy:
+      # Keep the x86_64 result even if the new arm64 leg needs rework.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Nix package build
+            runner: ubuntu-24.04
+            machine: x86_64
+            system: x86_64-linux
+          - name: Nix package build (ARM64)
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+            system: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Assert this leg is what its name claims: a native runner of the
+      # expected machine type, whose Nix evaluates the package for itself
+      # rather than cross-building or substituting another platform.
+      - name: Assert the native runner architecture
+        run: |
+          set -eu
+          machine=$(uname -m)
+          native_system=$(nix eval --raw --impure --expr builtins.currentSystem)
+          package_system=$(nix eval --raw .#snowbar.system)
+          test "$machine" = "${{ matrix.machine }}"
+          test "$native_system" = "${{ matrix.system }}"
+          test "$package_system" = "${{ matrix.system }}"
+          printf 'Runner machine %s, native Nix system %s, package system %s\n' \
+            "$machine" "$native_system" "$package_system"
+
+      - name: Build the packaged Snowbar
+        run: |
+          set -eu
+          out=$(nix build .#snowbar --no-link --print-out-paths --print-build-logs)
+          test -x "$out/bin/snowbar"
+          printf 'Packaged Snowbar: %s/bin/snowbar\n' "$out"
+
+  niri-smoke:
+    name: Experimental niri layer-shell smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # This experimental job deliberately rebuilds .#snowbar rather than
+      # sharing a Nix store with the package job. Sharing would require
+      # exporting and copying a whole closure between jobs; rebuilding keeps
+      # the required package check independent and the smoke job disposable.
+      - name: Build the packaged Snowbar to run outside the dev shell
+        run: |
+          set -eu
+          out=$(nix build .#snowbar --no-link --print-out-paths --print-build-logs)
+          test -x "$out/bin/snowbar"
+          echo "SNOWBAR_BIN=$out/bin/snowbar" >> "$GITHUB_ENV"
+
+      - name: Find pinned Mesa for software rendering
+        run: |
+          set -eu
+          mesa=$(nix build --inputs-from . --no-link --print-out-paths nixpkgs#mesa.out)
+          test -d "$mesa"
+          echo "SNOWBAR_SMOKE_MESA=$mesa" >> "$GITHUB_ENV"
+
+      - name: Run nested niri smoke assertions
+        timeout-minutes: 35
+        env:
+          SNOWBAR_SMOKE_DIR: ${{ runner.temp }}/snowbar-smoke
+        run: |
+          set -eu
+          mkdir -p "$SNOWBAR_SMOKE_DIR"
+          nix shell --inputs-from . \
+            nixpkgs#niri nixpkgs#weston nixpkgs#jq nixpkgs#mesa \
+            --command sh scripts/ci/niri-smoke.sh "$SNOWBAR_BIN"
+
+      - name: Upload smoke logs and optional screenshot
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: niri-smoke-logs
+          path: ${{ runner.temp }}/snowbar-smoke
+          if-no-files-found: ignore
+          retention-days: 7

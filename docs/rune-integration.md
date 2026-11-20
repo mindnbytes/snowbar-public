@@ -46,12 +46,13 @@ blockers rather than skipping a gate.
    Wait for explicit approval to publish and promote; a passing build by
    itself is not approval.
 6. **Publish, promote, and clean up.** Publish the approved fork commit first
-   and verify the remote ref. Update Snowbar's production SSH pin and lockfile;
-   check that the resolution matches the tested candidate aside from the source
-   URL. Verify the locked dependency and record the upstream and merge SHAs,
-   test and VM results, and known gaps in `reuse-decision.md`. Commit the
-   dependency update with the evidence, push only when authorized, and follow
-   the [artifact cleanup checklist](#temporary-artifact-cleanup).
+   and verify the remote ref. Update Snowbar's production anonymous HTTPS Cargo
+   pin, lockfile, and `cargoHash` in `flake.nix`; check
+   that the resolution matches the tested candidate aside from the source URL.
+   Verify the locked dependency and record the upstream and merge SHAs, test
+   and VM results, and known gaps in `reuse-decision.md`. Commit the dependency
+   update with the evidence, push only when authorized, and follow the
+   [artifact cleanup checklist](#temporary-artifact-cleanup).
 
 [#138]: https://github.com/anomalyco/rune/issues/138
 [#319]: https://github.com/anomalyco/rune/issues/319
@@ -64,6 +65,10 @@ reference if configured in your local `opencode.json`). Do not assume a
 branch name or copy a revision from these notes: `Cargo.toml` is the source
 of truth, and it should yield exactly one revision across the `rune`
 dependency and every patch.
+
+The production Cargo URLs in `Cargo.toml` and `Cargo.lock` use anonymous HTTPS
+so Nix builds and CI do not need SSH credentials. Contributor Git transport,
+including the permanent checkout and publishing the fork, remains SSH.
 
 ```sh
 pc=$(grep -o 'rev = "[0-9a-f]\{40\}"' Cargo.toml | cut -d'"' -f2 | sort -u)
