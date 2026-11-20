@@ -1,7 +1,7 @@
 # Rune integration checks
 
 Run these checks for every candidate Rune update before updating the application
-pin. The application and all five Cargo patches must point at the same tested
+pin. The application and all six Cargo patches must point at the same tested
 fork revision; Rune's workspace patches are not inherited by applications.
 
 ## Fork checkout and pin

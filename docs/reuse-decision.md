@@ -186,3 +186,19 @@ unimplemented upstream. `cargo check -p rune --example snowbar_probe` and the
 Linux VM `--bin snowbar` build passed, and the user visually verified the bar
 and its interactions in the niri VM with no regressions. Heavy test suites were
 intentionally skipped on the local Mac and VM due to memory constraints.
+
+### Upstream integration, 2026-11-19
+
+Fork commit [`3979a79`](https://github.com/mindnbytes/rune/commit/3979a79cc7baf9e85e23dab0894298af3dbb17bc)
+merges upstream [`f54cbcfa`](https://github.com/anomalyco/rune/commit/f54cbcfa84d995d339c243a579218f5062c940b5).
+It adopts upstream's Wayland keyboard focus and modifier changes while keeping
+the fork's top reservation, offset-based keymap read (including the empty-map
+guard), and layer-shell wheel forwarding. Upstream's wheel routing and glide
+operate on the forwarded events; they do not replace forwarding. The vendored
+Wayland decoration changes require an additional `sctk-adwaita` Cargo patch.
+
+The temporary Linux candidate built and passed 56 focused Snowbar tests; one
+clock helper was intentionally ignored by the harness and invoked by its parent
+test. Clippy and the probe compile check passed. The user reported that the
+candidate worked as expected in the niri VM; individual checklist results were
+not recorded. Heavy all-target links and Rune's test suite were not run.
