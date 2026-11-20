@@ -2,14 +2,20 @@ name: CI
 
 # Pull-request verification for Snowbar packaging.
 #
-# The two stable checks below are intended to be required ruleset checks:
+# The stable checks below use explicit display names so rulesets can target
+# them:
 #   - "Anonymous Cargo build"
-#   - "Nix package build"
+#   - "Nix package build"         (x86_64-linux)
+#   - "Nix package build (ARM64)" (aarch64-linux)
+#
+# The ARM64 leg is a matrix entry on GitHub's standard public-repository arm64
+# runner (`ubuntu-24.04-arm`) and builds the same pinned flake package
+# natively, including the package's focused Snowbar tests. The anonymous
+# Cargo build and nested-compositor smoke test run on x86_64 only.
 #
 # "Experimental niri layer-shell smoke" is deliberately a separate check and is
-# not intended to be required yet. Its nested Weston + niri mechanics have not
-# been verified on a hosted Linux runner. Keep its failures visible until the
-# first remote run has shown that the assertions are reliable.
+# not intended to be required yet. Keep its failures visible while it builds
+# a track record on hosted runners.
 #
 # No job uses repository secrets, persisted checkout credentials, SSH, or a
 # shared Cargo cache. The Cargo job proves the pinned Rune fork fetches over
@@ -108,8 +114,25 @@ jobs:
           echo "Built $target_dir/debug/snowbar with an empty CARGO_HOME=$cargo_home"
 
   nix-package-build:
-    name: Nix package build
-    runs-on: ubuntu-24.04
+    # Both legs run the same steps against the same pinned flake. The display
+    # names stay explicit: "Nix package build" is unchanged, and
+    # "Nix package build (ARM64)" is the stable name for the
+    # native arm64 check.
+    name: ${{ matrix.name }}
+    strategy:
+      # Keep the x86_64 result even if the new arm64 leg needs rework.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Nix package build
+            runner: ubuntu-24.04
+            machine: x86_64
+            system: x86_64-linux
+          - name: Nix package build (ARM64)
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+            system: aarch64-linux
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - name: Check out without persisted credentials
@@ -122,6 +145,21 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+
+      # Assert this leg is what its name claims: a native runner of the
+      # expected machine type, whose Nix evaluates the package for itself
+      # rather than cross-building or substituting another platform.
+      - name: Assert the native runner architecture
+        run: |
+          set -eu
+          machine=$(uname -m)
+          native_system=$(nix eval --raw --impure --expr builtins.currentSystem)
+          package_system=$(nix eval --raw .#snowbar.system)
+          test "$machine" = "${{ matrix.machine }}"
+          test "$native_system" = "${{ matrix.system }}"
+          test "$package_system" = "${{ matrix.system }}"
+          printf 'Runner machine %s, native Nix system %s, package system %s\n' \
+            "$machine" "$native_system" "$package_system"
 
       - name: Build the packaged Snowbar
         run: |
